@@ -126,6 +126,7 @@ struct xFTP_CLIENT
 	FF_FILE *pxWriteHandle;
 	//FIL pxFileHandle_fatfs; /* FatFS */
 	file_desc_t *pxFileHandle_vfs; /* VFS */
+	BaseType_t isReadHandleOpen_vfs;
 	char pcCurrentDir[ ffconfigMAX_FILENAME ];
 	char pcFileName[ ffconfigMAX_FILENAME ];
 	char pcConnectionAck[ 128 ];
@@ -146,6 +147,7 @@ struct xFTP_CLIENT
 			uint32_t
 				bIsListen : 1,			/* pdTRUE for passive data connections (using list()). */
 				bDirHasEntry : 1,		/* pdTRUE if ff_findfirst() was successful. */
+				bisListActive_vfs : 1,		/* pdTRUE if Dir list send in progress */
 				bClientConnected : 1,	/* pdTRUE after connect() or accept() has succeeded. */
 				bEmptyFile : 1,			/* pdTRUE if a connection-without-data was received. */
 				bHadError : 1;			/* pdTRUE if a transfer got aborted because of an error. */

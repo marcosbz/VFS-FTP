@@ -223,7 +223,7 @@ See http://www.freertos.org/FreeRTOS-Plus/FreeRTOS_Plus_TCP/TCP_Echo_Server.html
 #define mainCREATE_TCP_ECHO_TASKS_SEPARATE			0
 #define mainCREATE_SIMPLE_TCP_ECHO_SERVER			1
 #define mainCREATE_FTP_SERVER						1
-#define mainCREATE_HTTP_SERVER 						1
+#define mainCREATE_HTTP_SERVER 						0
 #define mainCREATE_TFTP_SERVER						0
 
 /* Set the following constant to pdTRUE to log using the method indicated by the

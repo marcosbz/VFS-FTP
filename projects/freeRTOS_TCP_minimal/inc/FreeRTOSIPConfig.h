@@ -322,7 +322,7 @@ disconnecting stage will timeout after a period of non-activity. */
 #define ipconfigFTP_RX_ZERO_COPY 1
 
 #define ipconfigUSE_FTP 1
-#define ipconfigUSE_HTTP 1
+#define ipconfigUSE_HTTP 0
 #define configHTTP_ROOT "/http"
 
 #endif /* FREERTOS_IP_CONFIG_H */
