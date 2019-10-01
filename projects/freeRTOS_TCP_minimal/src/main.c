@@ -114,7 +114,8 @@
 #include "ooc.h"
 #include "device.h"
 //#include "mmcSPI.h"
-#include "storageUSB.h"
+//#include "storageUSB.h"
+#include "RAMDisk.h"
 //#include "nbdclient.h"
 
 /* VFS example test buffer size */
@@ -429,7 +430,7 @@ FF_Disk_t *pxDisk;
 	FF_RAMDiskShowPartition( pxDisk );
 
 	/* Create a few example files on the disk.  These are not deleted again. */
-	vCreateAndVerifyExampleFiles( mainRAM_DISK_NAME );
+	//vCreateAndVerifyExampleFiles( mainRAM_DISK_NAME );
 	/* Create and verify VFS sample files in USB disk */
 	vfs_task();
 
@@ -889,8 +890,9 @@ void HardFault_Handler(void)
 static void vfs_task( void )
 {
    //MmcSPI mmc0;
-   StorageUSB usb0;
+   //StorageUSB usb0;
    //Nbd nbd0;
+   RAMDisk ram0;
    filesystem_info_t *fs;
    file_desc_t *file0, *file1, *file2, *file3;
 
@@ -916,14 +918,16 @@ static void vfs_task( void )
 
    /* Create device and initialize it */
    //ooc_init_class(MmcSPI);
-   ooc_init_class(StorageUSB);
+   //ooc_init_class(StorageUSB);
    //ooc_init_class(Nbd);
+   ooc_init_class(RAMDisk);
 
    //mmc0 = mmcSPI_new(); if(NULL == mmc0) while(1);
-   usb0 = storageUSB_new(); if(NULL == usb0) while(1);
+   //usb0 = storageUSB_new(); if(NULL == usb0) while(1);
    //nbd0 = nbd_new(); if(NULL == nbd0) while(1);
+   ram0 = RAMDisk_new(); if(NULL == ram0) while(1);
 
-   ret = storageUSB_init(usb0); //if(ret < 0) while(1);
+   ret = RAMDisk_init(ram0, (void *)ucRAMDisk, mainRAM_DISK_SECTORS); //if(ret < 0) while(1);
    //ret = mmcSPI_init(mmc0); //if(ret < 0) while(1);
    //ret = nbd_init(nbd0); //if(ret < 0) while(1);
    if(0 == ret)
@@ -939,8 +943,9 @@ static void vfs_task( void )
 
    /* Create file system object with device and fs driver */
    //ret = filesystem_create(&fs, (Device *) &mmc0, &fat_driver); if(ret < 0) while(1);
-   ret = filesystem_create(&fs, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
+   //ret = filesystem_create(&fs, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
    //ret = filesystem_create(&fs, (Device *) &nbd0, &fat_driver); if(ret < 0) while(1);
+   ret = filesystem_create(&fs, (Device *) &ram0, &fat_driver); if(ret < 0) while(1);
 
    /* format */
    /* Set fat format parameters */
