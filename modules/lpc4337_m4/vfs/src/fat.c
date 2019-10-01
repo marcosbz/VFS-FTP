@@ -676,9 +676,11 @@ static int fat_umount_subtree_rec(vnode_t *root)
 
 static size_t fat_file_write(file_desc_t *desc, void *buf, size_t size)
 {
+   vnode_t *node;
    fat_file_info_t *finfo;
    uint32_t write_size;
 
+   node = desc->node;
    finfo = desc->node->f_info.down_layer_info;
 
    if(desc->cursor > f_size(&(finfo->fatfs_fp)))
@@ -689,6 +691,7 @@ static size_t fat_file_write(file_desc_t *desc, void *buf, size_t size)
    {
       if( FR_OK == f_write(&(finfo->fatfs_fp), buf, size, (UINT*)&write_size) )
       {
+         node->f_info.file_size = f_size(&(finfo->fatfs_fp));
          desc->cursor += write_size;
       }
       else /* Error in f_write */
@@ -740,8 +743,9 @@ FRESULT scan_files(vnode_t *dir_node)
          if(fno.fattrib & AM_DIR)
          {
             i = strlen(fat_path_buffer);
-            if( &fat_path_buffer[FAT_PATH_BUFFER_SIZE] == strncpy(&fat_path_buffer[i],
-                fno.fname, FAT_PATH_BUFFER_SIZE - i) )
+            fat_path_buffer[i] = '/';
+            if( &fat_path_buffer[FAT_PATH_BUFFER_SIZE] == strncpy(&fat_path_buffer[i+1],
+                fno.fname, FAT_PATH_BUFFER_SIZE - i - 1) )
             {
                /* End of path reached */
                return -1;
@@ -759,6 +763,7 @@ FRESULT scan_files(vnode_t *dir_node)
             }
             else /* Open failed */
             {
+               printf("scan_files: f_open(%s) FAILED\n", fat_path_buffer);
                break;
             }
          }
@@ -767,7 +772,7 @@ FRESULT scan_files(vnode_t *dir_node)
    }
    else
    {
-
+      printf("scan_files: f_opendir(%s) FAILED\n", fat_path_buffer);
    }
    return res;
 }

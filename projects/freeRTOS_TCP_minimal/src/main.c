@@ -959,13 +959,14 @@ static void vfs_task( void )
       // Turn ON LEDR if the write operation was fail
       while(1);
    }
-   //while(1);
+
    /* mount */
    ret = vfs_mkdir("/mount", 0); if(ret < 0) while(1);
 
    //ASSERT_SEQ(2);
 
-   ret = vfs_mount("/mount/fat", &fs); if(ret < 0) while(1);
+   ret = vfs_mount("/mount/fat", &fs);
+   if(ret < 0) while(1);
 
    //ASSERT_SEQ(3);
 
@@ -998,6 +999,10 @@ static void vfs_task( void )
    lret = vfs_write(&file0, buffer, TEST_BUFFER_SIZE); if(lret < 0) while(1);
    ret = vfs_close(&file0); if(ret < 0) while(1);
    ret = vfs_open("/mount/fat/file0", &file0, 0); if(ret < 0) while(1);
+   lret = vfs_size( &file0 );
+   FreeRTOS_debug_printf( ( "file 0 size: %lu\n", lret ) );
+   debugPrintlnString( "file 0 size: " ); debugPrintUInt(lret); debugPrintEnter();
+
    memset(buffer, 0, TEST_BUFFER_SIZE);
    lret = vfs_read(&file0, buffer, TEST_BUFFER_SIZE); if(lret != TEST_BUFFER_SIZE) while(1);
    ret = test_check_buffer(buffer, TEST_BUFFER_SIZE); if(ret < 0) while(1);

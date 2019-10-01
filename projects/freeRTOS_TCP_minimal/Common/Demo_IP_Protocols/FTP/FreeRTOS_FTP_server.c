@@ -1118,6 +1118,7 @@ static void prvTransferCloseSocket( FTPClient_t *pxClient )
 	pxClient->bits1.bIsListen = pdFALSE_UNSIGNED;
 	pxClient->bits1.bDirHasEntry = pdFALSE_UNSIGNED;
 	pxClient->bits1.bisListActive_vfs = pdFALSE_UNSIGNED;
+	pxClient->bits1.bisDirEmpty_vfs = pdFALSE;
 	pxClient->bits1.bClientConnected = pdFALSE_UNSIGNED;
 	pxClient->bits1.bHadError = pdFALSE_UNSIGNED;
 }
@@ -1719,7 +1720,7 @@ int res;
 		pxClient->isReadHandleOpen_vfs = pdTRUE;
 		//uxFileSize = pxClient->pxReadHandle->ulFileSize;
 		uxFileSize = vfs_size( &(pxClient->pxFileHandle_vfs) );
-
+		FreeRTOS_printf( ( "RetrieveFile: File open, size %u\n", uxFileSize ) );
 		pxClient->uxBytesLeft = uxFileSize;
 		if( pxClient->ulRestartOffset != 0ul )
 		{
@@ -2001,6 +2002,7 @@ uint32_t lret;
 		if( uxCount == 0 )
 		{
 			FreeRTOS_printf( ( "prvRetrieveFileWork_vfs: Count 0. Break\n" ) );
+			FreeRTOS_printf( ( "uxBytesLeft: %u uxSpace: %u\n", pxClient->uxBytesLeft, uxSpace ) );
 			break;
 		}
 
@@ -2239,6 +2241,7 @@ static BaseType_t prvListSendPrep_vfs( FTPClient_t *pxClient )
 				/* No entries in this dir */
 				FreeRTOS_printf( ("prvListSendPrep_vfs: Empty directory? (%s)\n", pxClient->pcCurrentDir ) );
 				prvSendReply( pxClient->xTransferSocket, "total 0\r\n", 0 );
+				pxClient->bits1.bisDirEmpty_vfs = pdTRUE;
 				pxClient->xDirCount++;
 			}
 		}
@@ -2425,7 +2428,15 @@ BaseType_t xTxSpace;
 				pxClient->xDirCount, ulTotalCount /1024, ulPercentage );
 		}
 
-//		if( xWriteLength )
+		if( pxClient->bits1.bisDirEmpty_vfs == pdTRUE )
+		{
+			BaseType_t xTrueValue = 1;
+
+			FreeRTOS_printf( ("\n\n\n\n\n\n\n\nFTP: prvListSendWork: Should close now\n\n\n\n\n" ) );
+				FreeRTOS_setsockopt( pxClient->xTransferSocket, 0, FREERTOS_SO_CLOSE_AFTER_SEND, ( void * ) &xTrueValue, sizeof( xTrueValue ) );
+			prvSendReply( pxClient->xTransferSocket, pcCOMMAND_BUFFER, xWriteLength );
+		}
+		if( xWriteLength )
 		{
 			if( pxClient->bits1.bDirHasEntry == pdFALSE_UNSIGNED )
 			{

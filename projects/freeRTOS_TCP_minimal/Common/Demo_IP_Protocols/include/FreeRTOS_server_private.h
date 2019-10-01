@@ -148,6 +148,7 @@ struct xFTP_CLIENT
 				bIsListen : 1,			/* pdTRUE for passive data connections (using list()). */
 				bDirHasEntry : 1,		/* pdTRUE if ff_findfirst() was successful. */
 				bisListActive_vfs : 1,		/* pdTRUE if Dir list send in progress */
+				bisDirEmpty_vfs : 1,		/* pdTRUE if Dir empty */
 				bClientConnected : 1,	/* pdTRUE after connect() or accept() has succeeded. */
 				bEmptyFile : 1,			/* pdTRUE if a connection-without-data was received. */
 				bHadError : 1;			/* pdTRUE if a transfer got aborted because of an error. */
