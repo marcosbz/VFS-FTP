@@ -74,7 +74,7 @@
 /** \brief Max in-memory vnodes allowed */
 #define VFS_NODES_MAX 32
 /** \brief Max length of a filename */
-#define FS_NAME_MAX 15
+#define FS_NAME_MAX 10
 /** \brief Max length of an absolute path string */
 #define FS_PATH_MAX 256
 /** \brief Max files open simultaneously */

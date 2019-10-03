@@ -114,7 +114,7 @@
 #include "ooc.h"
 #include "device.h"
 //#include "mmcSPI.h"
-//#include "storageUSB.h"
+#include "storageUSB.h"
 #include "RAMDisk.h"
 //#include "nbdclient.h"
 
@@ -890,16 +890,16 @@ void HardFault_Handler(void)
 static void vfs_task( void )
 {
    //MmcSPI mmc0;
-   //StorageUSB usb0;
+   StorageUSB usb0;
    //Nbd nbd0;
    RAMDisk ram0;
-   filesystem_info_t *fs;
-   file_desc_t *file0, *file1, *file2, *file3;
+   filesystem_info_t *fs0, *fs1;
+   file_desc_t *file0, *file1, *file2, *file3, *file4, *file5, *file6, *file7;
 
    uint8_t buffer[TEST_BUFFER_SIZE];
    fat_format_param_t format_parameters;
 
-   int32_t ret;
+   int32_t ret, ret0, ret1;
    uint32_t lret;
 
    /* init CIAA kernel and devices */
@@ -918,19 +918,20 @@ static void vfs_task( void )
 
    /* Create device and initialize it */
    //ooc_init_class(MmcSPI);
-   //ooc_init_class(StorageUSB);
+   ooc_init_class(StorageUSB);
    //ooc_init_class(Nbd);
    ooc_init_class(RAMDisk);
 
    //mmc0 = mmcSPI_new(); if(NULL == mmc0) while(1);
-   //usb0 = storageUSB_new(); if(NULL == usb0) while(1);
+   usb0 = storageUSB_new(); if(NULL == usb0) while(1);
    //nbd0 = nbd_new(); if(NULL == nbd0) while(1);
    ram0 = RAMDisk_new(); if(NULL == ram0) while(1);
 
-   ret = RAMDisk_init(ram0, (void *)ucRAMDisk, mainRAM_DISK_SECTORS); //if(ret < 0) while(1);
+   ret0 = RAMDisk_init(ram0, (void *)ucRAMDisk, mainRAM_DISK_SECTORS); //if(ret < 0) while(1);
+   ret1 = storageUSB_init(usb0); //if(ret < 0) while(1);
    //ret = mmcSPI_init(mmc0); //if(ret < 0) while(1);
    //ret = nbd_init(nbd0); //if(ret < 0) while(1);
-   if(0 == ret)
+   if(0 == ret0 && 0 == ret1)
    {
       // Turn ON LEDG if the write operation was successful
       gpioWrite( DO4, ON );
@@ -943,9 +944,9 @@ static void vfs_task( void )
 
    /* Create file system object with device and fs driver */
    //ret = filesystem_create(&fs, (Device *) &mmc0, &fat_driver); if(ret < 0) while(1);
-   //ret = filesystem_create(&fs, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
+   ret0 = filesystem_create(&fs0, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
    //ret = filesystem_create(&fs, (Device *) &nbd0, &fat_driver); if(ret < 0) while(1);
-   ret = filesystem_create(&fs, (Device *) &ram0, &fat_driver); if(ret < 0) while(1);
+   ret1 = filesystem_create(&fs1, (Device *) &ram0, &fat_driver); if(ret < 0) while(1);
 
    /* format */
    /* Set fat format parameters */
@@ -953,8 +954,9 @@ static void vfs_task( void )
    //format_parameters.block_size = 1024;
    //format_parameters.block_node_factor = 4;
 
-   ret = vfs_format(&fs, NULL);
-   if(0 == ret)
+   ret0 = vfs_format(&fs0, NULL);
+   ret1 = vfs_format(&fs1, NULL);
+   if(0 == ret0 && 0 == ret1)
    {
       // Turn ON LEDG if the write operation was successful
       gpioWrite( DO5, ON );
@@ -970,40 +972,57 @@ static void vfs_task( void )
 
    //ASSERT_SEQ(2);
 
-   ret = vfs_mount("/mount/fat", &fs);
-   if(ret < 0) while(1);
+   ret0 = vfs_mount("/mount/usb", &fs0);
+   ret1 = vfs_mount("/mount/ram", &fs1);
+   if(ret0 < 0 || ret1 < 0) while(1);
 
    //ASSERT_SEQ(3);
 
-   ret = vfs_mkdir("/mount/fat/dir0", 0); if(ret < 0) while(1);
-   ret = vfs_mkdir("/mount/fat/dir1", 0); if(ret < 0) while(1);
-   ret = vfs_mkdir("/mount/fat/dir2", 0); if(ret < 0) while(1);
-   ret = vfs_mkdir("/mount/fat/dir2/dir3", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/ram/dir0", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/ram/dir1", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/ram/dir2", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/ram/dir2/dir3", 0); if(ret < 0) while(1);
+
+   ret = vfs_mkdir("/mount/usb/dir4", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/usb/dir5", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/usb/dir6", 0); if(ret < 0) while(1);
+   ret = vfs_mkdir("/mount/usb/dir6/dir7", 0); if(ret < 0) while(1);
 
    //ASSERT_SEQ(4);
    /* Show actual vfs tree */
 
    //ASSERT_SEQ(5);
    /* Fixme: Duplicated file in FAT. Error not handled */
-   ret = vfs_open("/mount/fat/file0", &file0, VFS_O_CREAT); if(ret < 0) while(1);
-   ret = vfs_open("/mount/fat/file1", &file1, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/file0", &file0, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/file1", &file1, VFS_O_CREAT); if(ret < 0) while(1);
+
+   ret = vfs_open("/mount/usb/file4", &file4, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/usb/file5", &file5, VFS_O_CREAT); if(ret < 0) while(1);
 
    //ASSERT_SEQ(6);
 
-   ret = vfs_open("/mount/fat/dir2/file2", &file2, VFS_O_CREAT); if(ret < 0) while(1);
-   ret = vfs_open("/mount/fat/dir2/file3", &file3, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/dir2/file2", &file2, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/dir2/file3", &file3, VFS_O_CREAT); if(ret < 0) while(1);
    ret = vfs_close(&file0); if(ret < 0) while(1);
    ret = vfs_close(&file1); if(ret < 0) while(1);
    ret = vfs_close(&file2); if(ret < 0) while(1);
    ret = vfs_close(&file3); if(ret < 0) while(1);
 
+   ret = vfs_open("/mount/usb/dir6/file6", &file6, VFS_O_CREAT);
+   if(ret < 0) while(1);
+   ret = vfs_open("/mount/usb/dir6/file7", &file7, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_close(&file4); if(ret < 0) while(1);
+   ret = vfs_close(&file5); if(ret < 0) while(1);
+   ret = vfs_close(&file6); if(ret < 0) while(1);
+   ret = vfs_close(&file7); if(ret < 0) while(1);
+
    //ASSERT_SEQ(7);
 
-   ret = vfs_open("/mount/fat/file0", &file0, 0); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/file0", &file0, 0); if(ret < 0) while(1);
    test_fill_buffer(buffer, TEST_BUFFER_SIZE);
    lret = vfs_write(&file0, buffer, TEST_BUFFER_SIZE); if(lret < 0) while(1);
    ret = vfs_close(&file0); if(ret < 0) while(1);
-   ret = vfs_open("/mount/fat/file0", &file0, 0); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/file0", &file0, 0); if(ret < 0) while(1);
    lret = vfs_size( &file0 );
    FreeRTOS_debug_printf( ( "file 0 size: %lu\n", lret ) );
    debugPrintlnString( "file 0 size: " ); debugPrintUInt(lret); debugPrintEnter();
@@ -1013,18 +1032,39 @@ static void vfs_task( void )
    ret = test_check_buffer(buffer, TEST_BUFFER_SIZE); if(ret < 0) while(1);
    lret = vfs_read(&file0, buffer, TEST_BUFFER_SIZE); if(lret != 0) while(1);
 
+   ret = vfs_open("/mount/usb/file4", &file4, 0); if(ret < 0) while(1);
+   test_fill_buffer(buffer, TEST_BUFFER_SIZE);
+   lret = vfs_write(&file4, buffer, TEST_BUFFER_SIZE); if(lret < 0) while(1);
+   ret = vfs_close(&file4); if(ret < 0) while(1);
+   ret = vfs_open("/mount/usb/file4", &file4, 0); if(ret < 0) while(1);
+   lret = vfs_size( &file4 );
+   FreeRTOS_debug_printf( ( "file 4 size: %lu\n", lret ) );
+   debugPrintlnString( "file 4 size: " ); debugPrintUInt(lret); debugPrintEnter();
+
+   memset(buffer, 0, TEST_BUFFER_SIZE);
+   lret = vfs_read(&file4, buffer, TEST_BUFFER_SIZE); if(lret != TEST_BUFFER_SIZE) while(1);
+   ret = test_check_buffer(buffer, TEST_BUFFER_SIZE); if(ret < 0) while(1);
+   lret = vfs_read(&file4, buffer, TEST_BUFFER_SIZE); if(lret != 0) while(1);
+
    //ASSERT_SEQ(8);
 
    ret = vfs_close(&file0); if(ret < 0) while(1);
-   ret = vfs_unlink("/mount/fat/dir2/file2"); if(ret < 0) while(1);
-   ret = vfs_unlink("/mount/fat/dir2/file3"); if(ret < 0) while(1);
-   ret = vfs_open("/mount/fat/dir2/file4", &file0, VFS_O_CREAT); if(ret < 0) while(1);
-   ret = vfs_open("/mount/fat/dir2/file5", &file1, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_unlink("/mount/ram/dir2/file2"); if(ret < 0) while(1);
+   ret = vfs_unlink("/mount/ram/dir2/file3"); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/dir2/file4", &file0, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/dir2/file5", &file1, VFS_O_CREAT); if(ret < 0) while(1);
    ret = vfs_close(&file1); if(ret < 0) while(1);
+
+   ret = vfs_close(&file4); if(ret < 0) while(1);
+   ret = vfs_unlink("/mount/usb/dir6/file6"); if(ret < 0) while(1);
+   ret = vfs_unlink("/mount/usb/dir6/file7"); if(ret < 0) while(1);
+   ret = vfs_open("/mount/usb/dir6/file8", &file4, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/usb/dir6/file9", &file5, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_close(&file5); if(ret < 0) while(1);
 
    //ASSERT_SEQ(9);
 
-   ret = vfs_open("/mount/fat/dir2/file5", &file3, VFS_O_CREAT); if(ret < 0) while(1);
+   ret = vfs_open("/mount/ram/dir2/file5", &file3, VFS_O_CREAT); if(ret < 0) while(1);
    test_fill_buffer(buffer, TEST_BUFFER_SIZE);
    lret = vfs_write(&file3, buffer, TEST_BUFFER_SIZE); if(lret != TEST_BUFFER_SIZE) while(1);
    memset(buffer, 0, TEST_BUFFER_SIZE);
@@ -1032,6 +1072,15 @@ static void vfs_task( void )
    lret = vfs_read(&file3, buffer, TEST_BUFFER_SIZE); if(lret != TEST_BUFFER_SIZE) while(1);
    ret = test_check_buffer(buffer, TEST_BUFFER_SIZE); if(ret < 0) while(1);
    ret = vfs_close(&file3); if(ret < 0) while(1);
+
+   ret = vfs_open("/mount/usb/dir6/file9", &file7, VFS_O_CREAT); if(ret < 0) while(1);
+   test_fill_buffer(buffer, TEST_BUFFER_SIZE);
+   lret = vfs_write(&file7, buffer, TEST_BUFFER_SIZE); if(lret != TEST_BUFFER_SIZE) while(1);
+   memset(buffer, 0, TEST_BUFFER_SIZE);
+   lret = vfs_lseek(&file7, 0, SEEK_SET); if(lret != 0) while(1);
+   lret = vfs_read(&file7, buffer, TEST_BUFFER_SIZE); if(lret != TEST_BUFFER_SIZE) while(1);
+   ret = test_check_buffer(buffer, TEST_BUFFER_SIZE); if(ret < 0) while(1);
+   ret = vfs_close(&file7); if(ret < 0) while(1);
 
    gpioWrite( DO6, ON );
    //while(1);
