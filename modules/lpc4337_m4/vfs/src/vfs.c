@@ -84,7 +84,7 @@ FIXME:
 #define ASSERT_MSG(cond, msg) assert_msg((cond), (msg), __FILE__, __LINE__)
 
 /* Define 8K arena for FS */
-#define FS_ARENA_MEMORY (20 * 1024)
+#define FS_ARENA_MEMORY (64 * 1024)
 
 /*==================[internal data declaration]==============================*/
 
@@ -226,7 +226,7 @@ static file_descriptor_table_t *file_desc_tab_p = &_f_tab;
 /** \brief tlsf dynamic memory pool. Use uint32_t to align to 32 bits
  *
  */
-uint32_t fs_arena_area[FS_ARENA_MEMORY/sizeof(uint32_t)];
+__attribute__ ((section(".mysection"))) uint32_t fs_arena_area[FS_ARENA_MEMORY/sizeof(uint32_t)];
 
 /*==================[external data definition]===============================*/
 /** \brief memory pool handle

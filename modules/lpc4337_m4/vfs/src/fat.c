@@ -254,8 +254,9 @@ static int fat_file_open(file_desc_t *file)
    int ret = -1;
    fat_file_info_t *finfo;
 
+   
    finfo = file->node->f_info.down_layer_info;
-
+   file->node->f_info.file_size = f_size(&(finfo->fatfs_fp));
    /* Call Chan FatFS */
    if( FR_OK == f_lseek (&(finfo->fatfs_fp), file->cursor) )
    {
@@ -740,26 +741,29 @@ FRESULT scan_files(vnode_t *dir_node)
          /* Only read data if this is a regular file. Dont read directory data? */
          finfo = child_node->f_info.down_layer_info;
          memcpy((void *)&(finfo->fno), (void *)&fno, sizeof(FILINFO));
+
+         i = strlen(fat_path_buffer);
+         fat_path_buffer[i] = '/';
+         if( &fat_path_buffer[FAT_PATH_BUFFER_SIZE] == strncpy(&fat_path_buffer[i+1],
+             fno.fname, FAT_PATH_BUFFER_SIZE - i - 1) )
+         {
+            /* End of path reached */
+            return -1;
+         }
+
          if(fno.fattrib & AM_DIR)
          {
-            i = strlen(fat_path_buffer);
-            fat_path_buffer[i] = '/';
-            if( &fat_path_buffer[FAT_PATH_BUFFER_SIZE] == strncpy(&fat_path_buffer[i+1],
-                fno.fname, FAT_PATH_BUFFER_SIZE - i - 1) )
-            {
-               /* End of path reached */
-               return -1;
-            }
+            child_node->f_info.type = VFS_FTDIR;
             res = scan_files(child_node);
             if(FR_OK != res) break;
-            fat_path_buffer[i] = 0;
          }
          else
          {
+            child_node->f_info.type = VFS_FTREG;
             res = f_open(&(finfo->fatfs_fp), fat_path_buffer, FA_READ | FA_WRITE);
             if( FR_OK == res )
             {
-
+               child_node->f_info.file_size = f_size(&(finfo->fatfs_fp));
             }
             else /* Open failed */
             {
@@ -767,6 +771,7 @@ FRESULT scan_files(vnode_t *dir_node)
                break;
             }
          }
+         fat_path_buffer[i] = 0;
       }
       f_closedir(&dir);
    }

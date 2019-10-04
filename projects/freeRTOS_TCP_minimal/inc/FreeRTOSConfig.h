@@ -144,7 +144,7 @@ take up unnecessary RAM. */
 
 /* Only used when running in the FreeRTOS Windows simulator.  Defines the
 priority of the task used to simulate Ethernet interrupts. */
-#define configMAC_ISR_SIMULATOR_PRIORITY	( configMAX_PRIORITIES - 1 )
+#define configMAC_ISR_SIMULATOR_PRIORITY	( configMAX_PRIORITIES - 2 )
 
 /* This demo creates a virtual network connection by accessing the raw Ethernet
 or WiFi data to and from a real network connection.  Many computers have more
