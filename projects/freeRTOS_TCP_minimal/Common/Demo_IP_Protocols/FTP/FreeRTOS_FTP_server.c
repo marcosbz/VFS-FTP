@@ -229,6 +229,8 @@ static BaseType_t prvRetrieveFileWork_vfs( FTPClient_t *pxClient );
  */
 static BaseType_t prvStoreFilePrep( FTPClient_t *pxClient, char *pcFileName );
 static BaseType_t prvStoreFileWork( FTPClient_t *pxClient );
+static BaseType_t prvStoreFilePrep_vfs( FTPClient_t *pxClient, char *pcFileName );
+static BaseType_t prvStoreFileWork_vfs( FTPClient_t *pxClient );
 
 /*
  * Print/format a single directory entry in Unix style.
@@ -365,11 +367,11 @@ BaseType_t xRc;
 				//xClientRc = prvRetrieveFileWork( pxClient );
 				xClientRc = prvRetrieveFileWork_vfs( pxClient );
 			}
-			else if( pxClient->pxWriteHandle != NULL )
+			else if( pxClient->pxWriteHandle_vfs != NULL )
 			{
 				FreeRTOS_printf( ( "xFTPClientWork: Receiving a file\n" ) );
 				/* Receiving a file. */
-				xClientRc = prvStoreFileWork( pxClient );
+				xClientRc = prvStoreFileWork_vfs( pxClient );
 			}
 
 			if( xClientRc < 0 )
@@ -705,7 +707,7 @@ BaseType_t xResult = 0;
 			break;
 
 		case ECMD_SIZE:
-			if( pxClient->pxWriteHandle != NULL )
+			if( pxClient->pxWriteHandle_vfs != NULL )
 			{
 				/* This SIZE query is probably about a file which is now being
 				received.  If so, return the value of pxClient->ulRecvBytes,
@@ -717,11 +719,11 @@ BaseType_t xResult = 0;
 				if( strcmp( pcNEW_DIR, pcRestCommand ) == 0 )
 				{
 				BaseType_t xCount;
-					for( xCount = 0; xCount < 3 && pxClient->pxWriteHandle; xCount++ )
+					for( xCount = 0; xCount < 3 && pxClient->pxWriteHandle_vfs; xCount++ )
 					{
-						prvStoreFileWork( pxClient );
+						prvStoreFileWork_vfs( pxClient );
 					}
-					if( pxClient->pxWriteHandle != NULL )
+					if( pxClient->pxWriteHandle_vfs != NULL )
 					{
 						/* File being queried is still open, return number of
 						bytes received until now. */
@@ -733,7 +735,7 @@ BaseType_t xResult = 0;
 			}
 			if( pcMyReply == NULL )
 			{
-				prvSizeDateFile( pxClient, pcRestCommand, pdFALSE );
+				prvSizeDateFile_vfs( pxClient, pcRestCommand, pdFALSE );
 			}
 			break;
 		case ECMD_MKD:
@@ -798,7 +800,7 @@ BaseType_t xResult = 0;
 					}
 					else
 					{
-						prvStoreFilePrep( pxClient, pcRestCommand );
+						prvStoreFilePrep_vfs( pxClient, pcRestCommand );
 						if( pxClient->bits1.bEmptyFile != pdFALSE_UNSIGNED )
 						{
 							/* Although the 'xTransferSocket' is closed already,
@@ -1065,7 +1067,8 @@ static void prvTransferCloseSocket( FTPClient_t *pxClient )
 		}
 	}
 
-	if( ( pxClient->pxWriteHandle != NULL ) || ( pxClient->pxReadHandle != NULL ) )
+	//if( ( pxClient->pxWriteHandle != NULL ) || ( pxClient->pxReadHandle != NULL ) )
+	if( ( pxClient->pxWriteHandle_vfs != NULL ) || ( pxClient->isReadHandleOpen_vfs == pdTRUE ) )
 	{
 	BaseType_t xLength;
 	char pcStrBuf[ 32 ];
@@ -1148,11 +1151,12 @@ static void prvTransferCloseSocket( FTPClient_t *pxClient )
 //}
 static void prvTransferCloseFile( FTPClient_t *pxClient )
 {
-	if( pxClient->pxWriteHandle != NULL )
+	if( pxClient->pxWriteHandle_vfs != NULL )
 	{
-		ff_fclose( pxClient->pxWriteHandle );
+		vfs_close( &(pxClient->pxFileHandle_vfs) );
 
 		pxClient->pxWriteHandle = NULL;
+		pxClient->pxWriteHandle_vfs = NULL;
 		#if( ipconfigFTP_HAS_RECEIVED_HOOK != 0 )
 		{
 			vApplicationFTPReceivedHook( pxClient->pcFileName, pxClient->ulRecvBytes, pxClient );
@@ -1442,133 +1446,158 @@ int iErrorNo;
 
 	return xResult;
 }
+
+/*
+Original: A client issues the STOR command after successfully establishing a data connection when it wishes to upload a copy of a local file to the server. The client provides the file name it wishes to use for the upload. If the file already exists on the server, it is replaced by the uploaded file. If the file does not exist, it is created. This command does not affect the contents of the client's local copy of the file.
+
+In this version: If the file already exists, return error code. Client will need to delete and create file again.
+*/
+static BaseType_t prvStoreFilePrep_vfs( FTPClient_t *pxClient, char *pcFileName )
+{
+BaseType_t xResult;
+file_desc_t *vfsNewFileHandle;
+//size_t uxFileSize = 0ul;
+int iErrorNo;
+int res;
+
+	/* Close previous handle (if any) and reset file transfer parameters. */
+	prvTransferCloseFile( pxClient );
+
+	xMakeAbsolute( pxClient, pxClient->pcFileName, sizeof( pxClient->pcFileName ), pcFileName );
+
+	vfsNewFileHandle = NULL;
+	xResult = pdFALSE;
+	res = -1;
+
+	/* Should not matter if offset not null. Client should modify file locally, delete remote and upload new version */
+	if( pxClient->ulRestartOffset != 0 )
+	{
+	}
+	else
+	{
+		res = vfs_open(pxClient->pcFileName, &vfsNewFileHandle, VFS_O_CREAT);
+	}
+
+	if( res )
+	{
+		iErrorNo = stdioGET_ERRNO();
+		if( iErrorNo == pdFREERTOS_ERRNO_ENOSPC )
+		{
+			prvSendReply( pxClient->xSocket, REPL_552, 0 );
+		}
+		else
+		{
+			/* "Requested file action not taken". */
+			prvSendReply( pxClient->xSocket, REPL_450, 0 );
+		}
+		FreeRTOS_printf( ( "ftp::storeFile: create %s: %s (errno %d)\n",
+			pxClient->pcFileName,
+			( const char* ) strerror( iErrorNo ), iErrorNo ) );
+
+		xResult = pdFALSE;
+	}
+	else
+	{
+		FreeRTOS_printf( ( "ftp::storeFile: OK create %s:\n", pxClient->pcFileName ) );
+		if( pxClient->bits1.bIsListen )
+		{
+			/* True if PASV is used. */
+			snprintf( pxClient->pcConnectionAck, sizeof( pxClient->pcConnectionAck ),
+				"150 Accepted data connection from %%xip:%%u\r\n" );
+			prvTransferCheck( pxClient );
+		}
+		else
+		{
+		BaseType_t xLength;
+
+			xLength = snprintf( pcCOMMAND_BUFFER, sizeof( pcCOMMAND_BUFFER ), "150 Opening BIN connection to store file\r\n" );
+			prvSendReply( pxClient->xSocket, pcCOMMAND_BUFFER, xLength );
+			pxClient->pcConnectionAck[ 0 ] = '\0';
+			prvTransferStart( pxClient ); /* Now active connect. */
+		}
+
+		pxClient->pxWriteHandle_vfs = vfsNewFileHandle;
+
+		/* To get some statistics about the performance. */
+		pxClient->xStartTime = xTaskGetTickCount( );
+
+		xResult = pdTRUE;
+	}
+
+	return xResult;
+}
+
 /*-----------------------------------------------------------*/
 
-#if( ipconfigFTP_ZERO_COPY_ALIGNED_WRITES == 0 )
+/*
+In VFS version ignore ipconfigFTP_ZERO_COPY_ALIGNED_WRITES optimization
+*/
+static BaseType_t prvStoreFileWork( FTPClient_t *pxClient )
+{
+BaseType_t xRc, xWritten;
 
-	static BaseType_t prvStoreFileWork( FTPClient_t *pxClient )
+	/* Read from the data socket until all has been read or until a negative value
+	is returned. */
+	for( ; ; )
 	{
-	BaseType_t xRc, xWritten;
+	char *pcBuffer;
 
-		/* Read from the data socket until all has been read or until a negative value
-		is returned. */
-		for( ; ; )
+		/* The "zero-copy" method: */
+		xRc = FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) &pcBuffer,
+			0x20000u, FREERTOS_ZERO_COPY | FREERTOS_MSG_DONTWAIT );
+		if( xRc <= 0 )
 		{
-		char *pcBuffer;
-
-			/* The "zero-copy" method: */
-			xRc = FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) &pcBuffer,
-				0x20000u, FREERTOS_ZERO_COPY | FREERTOS_MSG_DONTWAIT );
-			if( xRc <= 0 )
-			{
-				break;
-			}
-			pxClient->ulRecvBytes += xRc;
-			xWritten = ff_fwrite( pcBuffer, 1, xRc, pxClient->pxWriteHandle );
-			FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 );
-			if( xWritten != xRc )
-			{
-				xRc = -1;
-				/* bHadError: a transfer got aborted because of an error. */
-				pxClient->bits1.bHadError = pdTRUE_UNSIGNED;
-				break;
-			}
+			break;
 		}
-		return xRc;
+		pxClient->ulRecvBytes += xRc;
+		xWritten = ff_fwrite( pcBuffer, 1, xRc, pxClient->pxWriteHandle );
+		FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 );
+		if( xWritten != xRc )
+		{
+			FreeRTOS_printf( ( "ftp::storeFileWork fail: xW: %lu Xrc: %lu\n", xWritten, xRc ) );
+			xRc = -1;
+			/* bHadError: a transfer got aborted because of an error. */
+			pxClient->bits1.bHadError = pdTRUE_UNSIGNED;
+			break;
+		}
 	}
+	return xRc;
+}
 
-#else	/* ipconfigFTP_ZERO_COPY_ALIGNED_WRITES != 0 */
+static BaseType_t prvStoreFileWork_vfs( FTPClient_t *pxClient )
+{
+BaseType_t xRc;
+uint32_t lret;
 
-	#if !defined( ipconfigFTP_PREFERRED_WRITE_SIZE )
-		/* If you store data on flash, it may be profitable to give 'ipconfigFTP_PREFERRED_WRITE_SIZE'
-		the same size as the size of the flash' erase blocks, e.g. 4KB */
-		#define ipconfigFTP_PREFERRED_WRITE_SIZE	512ul
-	#endif
-
-	static BaseType_t prvStoreFileWork( FTPClient_t *pxClient )
+	/* Read from the data socket until all has been read or until a negative value
+	is returned. */
+	for( ; ; )
 	{
-	BaseType_t xRc, xWritten;
+	char *pcBuffer;
 
-		/* Read from the data socket until all has been read or until a negative
-		value is returned. */
-		for( ; ; )
+		/* The "zero-copy" method: */
+		xRc = FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) &pcBuffer,
+			0x20000u, FREERTOS_ZERO_COPY | FREERTOS_MSG_DONTWAIT );
+		if( xRc <= 0 )
 		{
-		char *pcBuffer;
-		UBaseType_t xStatus;
-
-			/* The "zero-copy" method: */
-			xRc = FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) &pcBuffer,
-				0x20000u, FREERTOS_ZERO_COPY | FREERTOS_MSG_DONTWAIT );
-
-			if( xRc <= 0 )
-			{
-				/* There are no data or the connection is closed. */
-				break;
-			}
-			xStatus = FreeRTOS_connstatus( pxClient->xTransferSocket );
-			if( xStatus != eESTABLISHED )
-			{
-				/* The connection is not established (any more), therefore
-				accept any amount of bytes, probably the last few bytes. */
-			}
-			else
-			{
-				if( xRc >= ipconfigFTP_PREFERRED_WRITE_SIZE )
-				{
-					/* More than a sector to write, round down to a multiple of
-					PREFERRED_WRITE_SIZE bytes. */
-					xRc = ( xRc / ipconfigFTP_PREFERRED_WRITE_SIZE ) * ipconfigFTP_PREFERRED_WRITE_SIZE;
-				}
-				else
-				{
-				const StreamBuffer_t *pxBuffer = FreeRTOS_get_rx_buf( pxClient->xTransferSocket );
-				size_t uxSpace = pxBuffer->LENGTH - pxBuffer->uxTail;
-
-					if( uxSpace >= ipconfigFTP_PREFERRED_WRITE_SIZE )
-					{
-						/* At this moment there are les than PREFERRED_WRITE_SIZE bytes in the RX
-						buffer, but there is space for more. Just return and
-						wait for more. */
-						xRc = 0;
-					}
-					else
-					{
-						/* Now reading beyond the end of the circular buffer,
-						use a normal read. */
-						pcBuffer = pcFILE_BUFFER;
-						xRc = FreeRTOS_recvcount( pxClient->xTransferSocket );
-						xRc = ( xRc / ipconfigFTP_PREFERRED_WRITE_SIZE ) * ipconfigFTP_PREFERRED_WRITE_SIZE;
-						if( xRc > 0 )
-						{
-							xRc = FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) pcBuffer,
-								sizeof( pcFILE_BUFFER ), FREERTOS_MSG_DONTWAIT );
-						}
-					}
-				}
-			}
-			if( xRc == 0 )
-			{
-				break;
-			}
-			pxClient->ulRecvBytes += xRc;
-
-			xWritten = ff_fwrite( pcBuffer, 1, xRc, pxClient->pxWriteHandle );
-			if( pcBuffer != pcFILE_BUFFER )
-			{
-				FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 );
-			}
-			if( xWritten != xRc )
-			{
-				xRc = -1;
-				/* bHadError: a transfer got aborted because of an error. */
-				pxClient->bits1.bHadError = pdTRUE_UNSIGNED;
-				break;
-			}
+			break;
 		}
-		return xRc;
+		pxClient->ulRecvBytes += xRc;
+		//xWritten = ff_fwrite( pcBuffer, 1, xRc, pxClient->pxWriteHandle );
+		lret = vfs_write( &(pxClient->pxWriteHandle_vfs), pcBuffer, (uint32_t)xRc );
+		FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 );
+		if( lret != (uint32_t)xRc )
+		{
+			FreeRTOS_printf( ( "ftp::storeFileWork fail: xW: %lu Xrc: %lu\n", lret, xRc ) );
+			xRc = -1;
+			/* bHadError: a transfer got aborted because of an error. */
+			pxClient->bits1.bHadError = pdTRUE_UNSIGNED;
+			break;
+		}
 	}
+	return xRc;
+}
 
-#endif /* ipconfigFTP_ZERO_COPY_ALIGNED_WRITES */
 /*-----------------------------------------------------------*/
 
 /*

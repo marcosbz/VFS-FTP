@@ -124,8 +124,9 @@ struct xFTP_CLIENT
 	FF_FindData_t xFindData;
 	FF_FILE *pxReadHandle;
 	FF_FILE *pxWriteHandle;
+	file_desc_t *pxWriteHandle_vfs;
 	//FIL pxFileHandle_fatfs; /* FatFS */
-	file_desc_t *pxFileHandle_vfs; /* VFS */
+	file_desc_t *pxFileHandle_vfs; /* VFS */ /* TODO: This should be pxReadHandle_vfs */
 	BaseType_t isReadHandleOpen_vfs;
 	char pcCurrentDir[ ffconfigMAX_FILENAME ];
 	char pcFileName[ ffconfigMAX_FILENAME ];
