@@ -946,6 +946,7 @@ extern int vfs_open(const char *path, file_desc_t **file, int flags)
    char *auxpath;
    int ret;
 
+   *file = NULL;
    auxpath = (char *) path;
    ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
    if (ret)
