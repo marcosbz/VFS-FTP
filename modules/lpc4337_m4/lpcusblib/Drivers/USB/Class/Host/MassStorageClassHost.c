@@ -268,7 +268,7 @@ static uint8_t MS_Host_WaitForDataReceived(USB_ClassInfo_MS_Host_t* const MSInte
 
 	return PIPE_RWSTREAM_NoError;
 }
-
+#define __LPC407X_8X__
 static uint8_t MS_Host_SendReceiveData(USB_ClassInfo_MS_Host_t* const MSInterfaceInfo,
                                        MS_CommandBlockWrapper_t* const SCSICommandBlock,
                                        void* BufferPtr)
@@ -335,7 +335,7 @@ static uint8_t MS_Host_SendReceiveData(USB_ClassInfo_MS_Host_t* const MSInterfac
 	return PIPE_RWSTREAM_NoError;
 #endif
 }
-
+#undef __LPC407X_8X__
 static uint8_t MS_Host_GetReturnedStatus(USB_ClassInfo_MS_Host_t* const MSInterfaceInfo,
                                          MS_CommandStatusWrapper_t* const SCSICommandStatus)
 {
