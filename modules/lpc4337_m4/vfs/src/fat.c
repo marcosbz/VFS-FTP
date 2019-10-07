@@ -552,6 +552,8 @@ static int fat_delete_node(vnode_t *parent_node, vnode_t *child_node)
    fat_path_buffer[0] = fsinfo->fatfs_devnum + '0';
    fat_path_buffer[1] = ':'; fat_path_buffer[2] = '\0';
 
+   /* TODO: Check if file or directory are open */
+   /* VFS already checks if ref_count is 0, so the node should be removeable */
    if( 0 == print_relative_path(child_node, fat_path_buffer+2, FAT_PATH_BUFFER_SIZE-2) )
    {
       if( VFS_FTREG == child_node->f_info.type ) /* File is regular so it was open */
@@ -564,7 +566,7 @@ static int fat_delete_node(vnode_t *parent_node, vnode_t *child_node)
             }
          }
       }
-      else /* File is dir so it was not open */
+      else /* Node is dir */
       {
          if( FR_OK == f_unlink((TCHAR*)fat_path_buffer) ) /* Just remove dir */
          {
@@ -680,6 +682,7 @@ static size_t fat_file_write(file_desc_t *desc, void *buf, size_t size)
    vnode_t *node;
    fat_file_info_t *finfo;
    uint32_t write_size;
+   int ret = -1;
 
    node = desc->node;
    finfo = desc->node->f_info.down_layer_info;
@@ -692,8 +695,12 @@ static size_t fat_file_write(file_desc_t *desc, void *buf, size_t size)
    {
       if( FR_OK == f_write(&(finfo->fatfs_fp), buf, size, (UINT*)&write_size) )
       {
-         node->f_info.file_size = f_size(&(finfo->fatfs_fp));
-         desc->cursor += write_size;
+         if( FR_OK == f_sync( &(finfo->fatfs_fp) ) )
+         {
+            node->f_info.file_size = f_size(&(finfo->fatfs_fp));
+            desc->cursor += write_size;
+            ret = 0;
+         }
       }
       else /* Error in f_write */
       {
@@ -704,7 +711,7 @@ static size_t fat_file_write(file_desc_t *desc, void *buf, size_t size)
    {
 
    }
-   return write_size;
+   return ( (0 == ret) ? write_size : 0 );
 }
 
 /* Uses fat_path_buffer[] */

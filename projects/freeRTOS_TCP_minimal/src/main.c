@@ -954,7 +954,7 @@ static void vfs_task( void )
    //format_parameters.block_size = 1024;
    //format_parameters.block_node_factor = 4;
 
-   //ret0 = vfs_format(&fs0, NULL);
+   ret0 = vfs_format(&fs0, NULL);
    ret0 = 0;
    ret1 = vfs_format(&fs1, NULL);
    if(0 == ret0 && 0 == ret1)

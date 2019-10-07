@@ -3026,8 +3026,9 @@ int iErrorNo;
 	/* DELE: Delete a file. */
 	xMakeAbsolute( pxClient, pxClient->pcFileName, sizeof( pxClient->pcFileName ), pcFileName );
 
-	iRc = ff_remove( pxClient->pcFileName );
-
+	//iRc = ff_remove( pxClient->pcFileName );
+	iRc = vfs_unlink( pxClient->pcFileName );
+	/* TODO: Add error codes to identify in the switch-case */
 	if (iRc >= 0 )
 	{
 		xLength = snprintf( pcCOMMAND_BUFFER, sizeof( pcCOMMAND_BUFFER ),
