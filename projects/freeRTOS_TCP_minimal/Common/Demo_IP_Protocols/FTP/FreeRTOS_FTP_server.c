@@ -1153,7 +1153,7 @@ static void prvTransferCloseFile( FTPClient_t *pxClient )
 {
 	if( pxClient->pxWriteHandle_vfs != NULL )
 	{
-		vfs_close( &(pxClient->pxFileHandle_vfs) );
+		vfs_close( &(pxClient->pxWriteHandle_vfs) );
 
 		pxClient->pxWriteHandle = NULL;
 		pxClient->pxWriteHandle_vfs = NULL;
@@ -1475,7 +1475,7 @@ int res;
 	}
 	else
 	{
-		res = vfs_open(pxClient->pcFileName, &vfsNewFileHandle, VFS_O_CREAT);
+		res = vfs_open(pxClient->pcFileName, &vfsNewFileHandle, VFS_O_CREAT | VFS_O_EXCL);
 	}
 
 	if( res )
