@@ -486,11 +486,19 @@ extern int vfs_umount(const char *target_path);
  **
  ** Create a new directory in the path dir_path
  **
- ** \param[in] dir_path path of the device to be opened
- ** \param[in] modedevice device to be opened
+ ** \param[in] dir_path path of the directory to be created
  ** \return -1 if an error occurs, 0 if success
  **/
 extern int vfs_mkdir(const char *dir_path, mode_t mode);
+
+/** \brief Removes a directory
+ **
+ ** Non recursive removal, directory must not have children
+ **
+ ** \param[in] dir_path path of the directory to be deleted
+ ** \return -1 if an error occurs, 0 if success
+ **/
+extern int vfs_rmdir(const char *dir_path);
 
 /** \brief Open a file
  **
