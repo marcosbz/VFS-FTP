@@ -2762,8 +2762,8 @@ static int ext2_dealloc_block_bit(vnode_t *node, uint32_t block)
    /* b>>3 (b/8) is then the byte offset in the bitmap where the bit of current node resides */
    //b = block - fsinfo->e2sb.s_first_data_block - (fsinfo->e2sb.s_blocks_per_group*finfo->f_group);
    //block_group = (block - fsinfo->e2sb.s_first_data_block) / fsinfo->e2sb.s_blocks_per_group;
-   block_group = block / fsinfo->e2sb.s_blocks_per_group;
-   b = block % fsinfo->e2sb.s_blocks_per_group;
+   block_group = (block - fsinfo->e2sb.s_first_data_block) / fsinfo->e2sb.s_blocks_per_group;
+   b = (block - fsinfo->e2sb.s_first_data_block) % fsinfo->e2sb.s_blocks_per_group;
    if(!block) return -1;
    ret = ext2_get_groupdesc(node->fs_info, block_group, &gd);
    if(ret)
