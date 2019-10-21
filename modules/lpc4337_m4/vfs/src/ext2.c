@@ -681,6 +681,8 @@ static int ext2_read_inode(vnode_t *dest_node, uint32_t inumber)
    finfo->f_inumber = inumber;
    finfo->f_size = ext2_node_buffer.i_size;
 
+   dest_node->f_info.file_size = finfo->f_size;
+
    return 0;
 }
 
@@ -918,6 +920,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
          return -1;
    }
 
+   ext2_device_buf_memset(dev, 0xFF, 0, 1024*1024*32); /* FIXME: DEBUG */
+
    /* Initialize default ext2 superblock contents */
    memset((uint8_t *)&superblock, 0, sizeof(ext2_superblock_t));
 
@@ -957,8 +961,10 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    superblock.s_uuid[13] = 0;
    superblock.s_uuid[14] = 0;
    superblock.s_uuid[15] = 0;
-   strcpy((char *) superblock.s_volume_name, "ext2");      /* volume name */
+   strcpy((char *) superblock.s_volume_name, "VFSEXT2");      /* volume name */
 
+   ext2_device_buf_write(dev, (uint8_t *)&superblock, 1024, sizeof(ext2_superblock_t));
+   while(1)
    /* Total blocks */
    superblock.s_blocks_count = format_parameters.partition_size;
    /* (block/node) factor = 4 */
@@ -1169,7 +1175,7 @@ static int ext2_format(filesystem_info_t *fs, void *param)
        */
       write_offset = (group_index == 0) ? EXT2_SBOFF : group_offset;
       /* Clear all superblock bytes */
-      ret = ext2_device_buf_memset(dev, 0, write_offset, EXT2_SBSIZE);
+      //ret = ext2_device_buf_memset(dev, 0, write_offset, EXT2_SBSIZE);
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
       if(ret)
       {
@@ -1177,7 +1183,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       }
       superblock.s_block_group_nr = group_index;
       /* Copy superblock to disk */
-      ret = ext2_device_buf_write(dev, (uint8_t *)&superblock, write_offset, sizeof(ext2_superblock_t));
+      //ret = ext2_device_buf_write(dev, (uint8_t *)&superblock, write_offset, sizeof(ext2_superblock_t));
+            ret = ext2_device_buf_write(dev, (uint8_t *)&superblock, 1024, sizeof(ext2_superblock_t));
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
       if(ret)
       {
@@ -1518,6 +1525,7 @@ static size_t ext2_file_write(file_desc_t *desc, void *buf, size_t size)
    {
       return 0;
    }
+   node->f_info.file_size = finfo->f_size;
 
    return buf_pos;
 }
@@ -1615,109 +1623,186 @@ static int ext2_buf_read_file(vnode_t * dest_node, uint8_t *buf, uint32_t size, 
 /* Map file block number to disk block number
  *
  */
-static int ext2_block_map(vnode_t * dest_node, uint32_t file_block, uint32_t *device_block_p)
+//static int ext2_block_map(vnode_t * dest_node, uint32_t file_block, uint32_t *device_block_p)
+//{
+//   uint32_t shift_block_level, shift_single_block_level;
+//   uint32_t temp_block_num, index_offset, aux, block_level;
+//   int ret;
+//   ext2_file_info_t *finfo;
+//   ext2_fs_info_t *fsinfo;
+//   Device dev;
+//   ext2_inode_t *pinode;
+//
+//   dev = dest_node->fs_info->device;
+//   fsinfo = dest_node->fs_info->down_layer_info;
+//   finfo = dest_node->f_info.down_layer_info;
+//
+//   ret = ext2_get_inode(dest_node->fs_info, finfo->f_inumber, &ext2_node_buffer);
+//   if(0 > ret)
+//   {
+//      return -1;
+//   }
+//   pinode = &ext2_node_buffer;
+//
+//   shift_single_block_level = 10 + (fsinfo->e2sb.s_log_block_size) - 2;
+//
+//   if (file_block < N_DIRECT_BLOCKS)
+//   {
+//      /* Direct block */
+//      *device_block_p = pinode->i_block[file_block];
+//      return 0;
+//   }
+//
+//   file_block -= N_DIRECT_BLOCKS;
+//
+//   for (   shift_block_level = 0, block_level = 1;
+//      file_block >= (int32_t)1<<(shift_single_block_level+shift_block_level);
+//      file_block -= (int32_t)1<<(shift_single_block_level+shift_block_level),
+//      shift_block_level += shift_single_block_level, block_level++)
+//   {
+//
+//   /* In every iteration a new block indirection level is reached.
+//    * In every loop, file_block is checked against the current block range
+//    * according to the current indirection (see table below).
+//    * The block range of the previous indirection level is subtracted from file_block
+//    * When the loop finishes, the maped block number is the offset inside the last indirection level reached,
+//    * and block_level leaves with the current indirection level
+//    */
+//   /* Indirection level and corresponding block ranges
+//    * 1024B/4B = 256 blocks
+//    * 1 2 4 8 16 32 64 128 256 512 1024
+//    * 0 1 2 3 4  5  6  7   8   9   10
+//    * N_INDIR_BLOCKS_PER_BLOCK: BLOCK_SIZE / sizeof(uint32_t)
+//    * N_INDIR_BLOCKS_PER_BLOCK**2
+//    * N_INDIR_BLOCKS_PER_BLOCK**3
+//    */
+//
+//      if(file_block < (int32_t) 1 << shift_block_level)
+//      {
+//         /* The block number is within current indirection level block range */
+//         break;
+//      }
+//      if (block_level > N_INDIRECT_BLOCKS)
+//      {
+//         /* Only 3 indirection levels are implemented in ext2. block_level is out of range */
+//         *device_block_p = 0;
+//         return -1;
+//      }
+//   }
+//
+//   /* In which of the three N_INDIRECT_BLOCKS ranges is the file block number?
+//    * If block_level=1, top indirect block number is i_blocks[12], indirection level 1
+//    * If block_level=2, top indirect block number is i_blocks[13], indirection level 2
+//    * If block_level=3, top indirect block number is i_blocks[14], indirection level 3
+//    */
+//   temp_block_num = pinode->i_block[N_DIRECT_BLOCKS + block_level - 1];
+//
+//   for (;block_level;block_level--)
+//   {
+//      if (temp_block_num == 0)
+//      {
+//         *device_block_p = 0; /* Block does not exist */
+//         return -1;
+//      }
+//      index_offset =    (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) + (
+//                        ((file_block & (((1<<shift_single_block_level)-1))<<(shift_block_level))
+//                        >> shift_block_level) * sizeof(uint32_t) );
+//
+//      ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+//      if(ret)
+//      {
+//         return -1;
+//      }
+//      shift_block_level -= shift_single_block_level;
+//   }
+//
+//
+//   *device_block_p = temp_block_num;
+//   return 0;
+//}
+
+static int ext2_block_map(vnode_t * node, uint32_t file_block, uint32_t *device_block_p)
 {
-   uint32_t shift_block_level, shift_single_block_level;
-   uint32_t temp_block_num, n_entries_per_block, index_offset, aux, block_level;
    int ret;
-   ext2_file_info_t *finfo;
-   ext2_fs_info_t *fsinfo;
-   Device dev;
+   uint32_t block_pos, temp_block_num, index_offset, block_offset;
+   uint8_t shift_block_level, shift_single_block_level, block_level;
    ext2_inode_t *pinode;
 
-   dev = dest_node->fs_info->device;
-   fsinfo = dest_node->fs_info->down_layer_info;
-   finfo = dest_node->f_info.down_layer_info;
-   n_entries_per_block = fsinfo->s_block_size / sizeof(uint32_t);
+   Device dev;
+   ext2_file_info_t *finfo;
+   ext2_fs_info_t *fsinfo;
 
-   ret = ext2_get_inode(dest_node->fs_info, finfo->f_inumber, &ext2_node_buffer);
+   dev = node->fs_info->device;
+   finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
+   fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
+
+   if(NULL == device_block_p)
+      return -1;
+
+   pinode = &ext2_node_buffer;
+   ret = ext2_get_inode(node->fs_info, finfo->f_inumber, pinode);
    if(0 > ret)
    {
       return -1;
    }
-   pinode = &ext2_node_buffer;
 
-   /* shift_single_level is the number of bits of the block indirection level mask */
-   for(shift_single_block_level = 0, aux = n_entries_per_block; aux; shift_single_block_level++)
+   *device_block_p = 0;
+   block_pos = file_block;
+   if (block_pos < N_DIRECT_BLOCKS)
    {
-      aux = aux>>1;
+      *device_block_p = pinode->i_block[block_pos];
+   }
+   else
+   {
+      /*
+       * 0:EXT2_DIR_BLOCK-1
+       * EXT2_DIR_BLOCK:EXT2_DIR_BLOCK+(1<<shift_single_block_level)-1
+       * EXT2_DIR_BLOCK+(1<<shift_single_block_level):EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))-1
+       * EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))-1:
+       * EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))+(1<<3*(shift_single_block_level))-1
+       */
+      /* Wanto to calculate shift_block_level */
+      shift_single_block_level = 10 + (fsinfo->e2sb.s_log_block_size) - 2;   /* log(block_size/4). How much 4 byte entries in 1 block */
+      block_pos -= N_DIRECT_BLOCKS;
+      /* Calculate level of indirection */
+      /* At first, get entry offset from N_DIRECT_BLOCKS */
+      /* block_pos >= 256? Then it cant be in first level of indirection. Begin from offset 256 (block_pos -= 256) and check next level */
+      /* block_pos >= 256*256? Then it cant be in second level of indirection. Begin from offset 256*256 (block_pos -= 256*256) and check next level */
+      for (   shift_block_level=0, block_level=1;
+         block_pos >= (int32_t)1<<(shift_single_block_level+shift_block_level);
+         block_pos -= (int32_t)1<<(shift_single_block_level+shift_block_level),
+         shift_block_level += shift_single_block_level, block_level++)
+      {
+         if (block_level > N_INDIRECT_BLOCKS)
+         {
+            return -1;
+         }
+      }
+
+      temp_block_num = pinode->i_block[N_DIRECT_BLOCKS - 1 + block_level];
+
+      /* block_level will tell the indirection level. shift_block_level is the shift of the mask */
+      for (;block_level;block_level--)
+      {
+         /* Calculate offset of the indirect block number contained in the current indirect block */
+         /* 1: temp_block_num is the block indicated in the inode (0-256)*/
+         /* 2: temp_block_num is the block indicated in the entry in the first level entry block (256-256*256) */
+         /* 3: temp_block_num is the block indicated in the entry in the second level entry block (256*256-256*256*256) */
+         index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
+                          (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+                          >> shift_block_level) * sizeof(uint32_t);
+         /* Read next indirection levels block. First block entry not in inode */
+         ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+         if(ret)
+         {
+            return -1;
+         }
+      }
+      *device_block_p = temp_block_num;
    }
 
-   if (file_block < N_DIRECT_BLOCKS)
-   {
-      /* Direct block */
-      *device_block_p = pinode->i_block[file_block];
-      return 0;
-   }
-
-   file_block -= N_DIRECT_BLOCKS;
-
-   for (   shift_block_level = 0, block_level = 1;
-      file_block >= (int32_t)1<<(shift_single_block_level+shift_block_level);
-      file_block -= (int32_t)1<<(shift_single_block_level+shift_block_level),
-      shift_block_level += shift_single_block_level, block_level++)
-   {
-
-   /* In every iteration a new block indirection level is reached.
-    * In every loop, file_block is checked against the current block range
-    * according to the current indirection (see table below).
-    * The block range of the previous indirection level is subtracted from file_block
-    * When the loop finishes, the maped block number is the offset inside the last indirection level reached,
-    * and block_level leaves with the current indirection level
-    */
-   /* Indirection level and corresponding block ranges
-    * 1024B/4B = 256 blocks
-    * 1 2 4 8 16 32 64 128 256 512 1024
-    * 0 1 2 3 4  5  6  7   8   9   10
-    * N_INDIR_BLOCKS_PER_BLOCK: BLOCK_SIZE / sizeof(uint32_t)
-    * N_INDIR_BLOCKS_PER_BLOCK**2
-    * N_INDIR_BLOCKS_PER_BLOCK**3
-    */
-
-      if(file_block < (int32_t) 1 << shift_block_level)
-      {
-         /* The block number is within current indirection level block range */
-         break;
-      }
-      if (block_level > N_INDIRECT_BLOCKS)
-      {
-         /* Only 3 indirection levels are implemented in ext2. block_level is out of range */
-         *device_block_p = 0;
-         return -1;
-      }
-   }
-
-   /* In which of the three N_INDIRECT_BLOCKS ranges is the file block number?
-    * If block_level=1, top indirect block number is i_blocks[12], indirection level 1
-    * If block_level=2, top indirect block number is i_blocks[13], indirection level 2
-    * If block_level=3, top indirect block number is i_blocks[14], indirection level 3
-    */
-   temp_block_num = pinode->i_block[N_DIRECT_BLOCKS + block_level - 1];
-
-   for (;block_level;block_level--)
-   {
-      if (temp_block_num == 0)
-      {
-         *device_block_p = 0; /* Block does not exist */
-         return -1;
-      }
-      index_offset =    (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) + (
-                        ((file_block & (((1<<shift_single_block_level)-1))<<(shift_block_level))
-                        >> shift_block_level) * sizeof(uint32_t) );
-
-      ret = ext2_device_buf_read(dev, (uint8_t *)temp_block_num, index_offset, sizeof(uint32_t));
-      if(ret)
-      {
-         return -1;
-      }
-      shift_block_level -= shift_single_block_level;
-   }
-
-
-   *device_block_p = temp_block_num;
    return 0;
 }
-
 
 
 static int ext2_mount_load(vnode_t *dir_node)
@@ -1835,6 +1920,7 @@ static int ext2_mount_load_rec(vnode_t *dir_node)
          }
          if(EXT2_FT_DIR == ext2_dir_entry_buffer.file_type)
          {
+            child_node->f_info.type = VFS_FTDIR;
             ret = ext2_mount_load_rec(child_node);
             ASSERT_MSG(0 == ret, "ext2_mount_load_rec(): ext2_mount_load_rec() failed");
             if(ret)
@@ -1940,7 +2026,7 @@ static int ext2_delete_regular_file(vnode_t *parent_node, vnode_t *node)
 
    file_blocks = finfo->f_size >> (10+fsinfo->e2sb.s_log_block_size);
    /* dealloc all data block of file */
-   for(fblock = 0; fblock <= file_blocks; fblock++)
+   for(fblock = 0; fblock < file_blocks; fblock++)
    {
       ret = ext2_block_map(node, fblock, &device_block);
       ASSERT_MSG(0 == ret, "ext2_delete_regular_file(): ext2_block_map() failed");
@@ -2422,6 +2508,7 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
       return -1;
    }
    flag_new_block = 0;   /* To tell if a new file block is being allocated */
+   new_block = 0;
    *device_block_p = 0;
    block_pos = file_block;
    if (block_pos < N_DIRECT_BLOCKS)
@@ -2450,8 +2537,12 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
        * EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))+(1<<3*(shift_single_block_level))-1
        */
       /* Wanto to calculate shift_block_level */
-      shift_single_block_level = fsinfo->e2sb.s_log_block_size - 2;   /* log(block_size/4). How much 4 byte entries in 1 block */
+      shift_single_block_level = 10 + (fsinfo->e2sb.s_log_block_size) - 2;   /* log(block_size/4). How much 4 byte entries in 1 block */
       block_pos -= N_DIRECT_BLOCKS;
+      /* Calculate level of indirection */
+      /* At first, get entry offset from N_DIRECT_BLOCKS */
+      /* block_pos >= 256? Then it cant be in first level of indirection. Begin from offset 256 (block_pos -= 256) and check next level */
+      /* block_pos >= 256*256? Then it cant be in second level of indirection. Begin from offset 256*256 (block_pos -= 256*256) and check next level */
       for (   shift_block_level=0, block_level=1;
          block_pos >= (int32_t)1<<(shift_single_block_level+shift_block_level);
          block_pos -= (int32_t)1<<(shift_single_block_level+shift_block_level),
@@ -2459,7 +2550,6 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
       {
          if (block_level > N_INDIRECT_BLOCKS)
          {
-            *device_block_p = 0;
             return -1;
          }
       }
@@ -2467,27 +2557,35 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
       temp_block_num = pinode->i_block[N_DIRECT_BLOCKS - 1 + block_level];
       if (0 == temp_block_num)
       {
+         /* No entry block allocated for this level. Entry block must be set to 0 */
          ret = ext2_alloc_block_bit(node, &temp_block_num);
          if(ret)
          {
-            *device_block_p = 0;
+            return -1;
+         }
+         ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+         if(ret)
+         {
             return -1;
          }
          pinode->i_block[N_DIRECT_BLOCKS - 1 + block_level] = temp_block_num;
          pinode->i_blocks += fsinfo->sectors_in_block;
       }
+
       /* block_level will tell the indirection level. shift_block_level is the shift of the mask */
       for (;block_level;block_level--)
       {
          /* Calculate offset of the indirect block number contained in the current indirect block */
+         /* 1: temp_block_num is the block indicated in the inode (0-256)*/
+         /* 2: temp_block_num is the block indicated in the entry in the first level entry block (256-256*256) */
+         /* 3: temp_block_num is the block indicated in the entry in the second level entry block (256*256-256*256*256) */
          index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
                           (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
                           >> shift_block_level) * sizeof(uint32_t);
-         /* Read next indirection levels block */
-         ret = ext2_device_buf_read(dev, (uint8_t *)temp_block_num, index_offset, sizeof(uint32_t));
+         /* Read next indirection levels block. First block entry not in inode */
+         ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
          if(ret)
          {
-            *device_block_p = 0;
             return -1;
          }
          /* Block number was not allocated. Allocate a block and write its number in the found position */
@@ -2498,25 +2596,25 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
             {
                return -1;
             }
-            ret = ext2_device_buf_write(dev, (uint8_t *)temp_block_num, index_offset, sizeof(uint32_t));
+            ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
             if(ret)
             {
-               *device_block_p = 0;
                return -1;
             }
-            flag_new_block = 1;
+            ret = ext2_device_buf_write(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+            if(ret)
+            {
+               return -1;
+            }
+            if(block_level) flag_new_block = 1; /* New data block has been allocated */
          }
       }
+      new_block = temp_block_num;
+      *device_block_p = temp_block_num;
    }
    if(1 == flag_new_block)
    {
-      /* Erase the contents of the new reserved block */
-      block_offset = new_block<<(10+fsinfo->e2sb.s_log_block_size);
-      ret = ext2_device_buf_memset(dev, 0, block_offset, fsinfo->s_block_size);
-      if(ret)
-      {
-         return -1;
-      }
+      /* Erase the contents of the new reserved data block? */
    }
    ret = ext2_set_inode(node->fs_info, finfo->f_inumber, pinode);
    if(0 > ret)
@@ -2526,6 +2624,8 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
 
    return 0;
 }
+
+
 
 /* Tries to alloc a block in the same group as the file */
 /* Modifies bookkeeping info */
@@ -2553,7 +2653,7 @@ static int ext2_alloc_block_bit(vnode_t * node, uint32_t *block)
    inode_group = (finfo->f_inumber - 1)/fsinfo->e2sb.s_inodes_per_group;
    /* Search a group with a free block, starting from the group of this file */
    for(group_index = inode_group, i=0; i < fsinfo->s_groups_count;
-         group_index = (group_index + 1) % fsinfo->s_groups_count)
+         group_index = (group_index + 1) % fsinfo->s_groups_count, i++)
    {
       ret = ext2_get_groupdesc(node->fs_info, group_index, &gd);
       if(ret)
@@ -2661,8 +2761,10 @@ static int ext2_dealloc_block_bit(vnode_t *node, uint32_t block)
    /* b is the inode number relative to current group, so its the bit offset in inode bitmap */
    /* b>>3 (b/8) is then the byte offset in the bitmap where the bit of current node resides */
    //b = block - fsinfo->e2sb.s_first_data_block - (fsinfo->e2sb.s_blocks_per_group*finfo->f_group);
-   block_group = (block - fsinfo->e2sb.s_first_data_block) / fsinfo->e2sb.s_blocks_per_group;
-   b = (block - fsinfo->e2sb.s_first_data_block) % fsinfo->e2sb.s_blocks_per_group;
+   //block_group = (block - fsinfo->e2sb.s_first_data_block) / fsinfo->e2sb.s_blocks_per_group;
+   block_group = block / fsinfo->e2sb.s_blocks_per_group;
+   b = block % fsinfo->e2sb.s_blocks_per_group;
+   if(!block) return -1;
    ret = ext2_get_groupdesc(node->fs_info, block_group, &gd);
    if(ret)
    {

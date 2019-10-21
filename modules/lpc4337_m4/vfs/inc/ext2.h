@@ -88,7 +88,8 @@
 #define EXT2_MAGIC  0xef53U
 
 /** \brief How much direct block addresses contains the inode */
-#define N_DIRECT_BLOCKS      11
+//#define N_DIRECT_BLOCKS      11 /* FIXME: Wrong number? */
+#define N_DIRECT_BLOCKS      12
 /** \brief How much INdirect block addresses contains the inode */
 #define N_INDIRECT_BLOCKS   3
 

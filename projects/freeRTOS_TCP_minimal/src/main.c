@@ -349,6 +349,8 @@ const uint32_t ulLongTime_ms = 250UL;
    debugPrintConfigUart( UART_USB, 115200 );
    debugPrintlnString( "Blinky con freeRTOS y sAPI." );
    stdioConfig(UART_USB);
+   NVIC_SetPriority( USART2_IRQn, 20 );
+   NVIC_SetPriority (SysTick_IRQn, 0);
    // Led para dar se�al de vida
    gpioWrite( DO4, ON );
 
@@ -897,10 +899,12 @@ static void vfs_task( void )
    file_desc_t *file0, *file1, *file2, *file3, *file4, *file5, *file6, *file7;
 
    uint8_t buffer[TEST_BUFFER_SIZE];
-   fat_format_param_t format_parameters;
+   fat_format_param_t fat_format_parameters;
+   ext2_format_param_t e2_format_parameters;
 
    int32_t ret, ret0, ret1;
    uint32_t lret;
+   uint32_t i;
 
    /* init CIAA kernel and devices */
    ret=vfs_init();
@@ -944,17 +948,21 @@ static void vfs_task( void )
 
    /* Create file system object with device and fs driver */
    //ret = filesystem_create(&fs, (Device *) &mmc0, &fat_driver); if(ret < 0) while(1);
-   ret0 = filesystem_create(&fs0, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
+   //ret0 = filesystem_create(&fs0, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
+   ret0 = filesystem_create(&fs0, (Device *) &usb0, &ext2_driver); if(ret < 0) while(1);
    //ret = filesystem_create(&fs, (Device *) &nbd0, &fat_driver); if(ret < 0) while(1);
    ret1 = filesystem_create(&fs1, (Device *) &ram0, &fat_driver); if(ret < 0) while(1);
 
    /* format */
-   /* Set fat format parameters */
-   //format_parameters.partition_size = 10*1024;
-   //format_parameters.block_size = 1024;
-   //format_parameters.block_node_factor = 4;
+   /* Set ext2 format parameters */
+   e2_format_parameters.partition_size = 32*1024; //2GB0
+   e2_format_parameters.block_size = 1024;
+   e2_format_parameters.block_node_factor = EXT2_DEFAULT_BLOCKNODE_FACTOR;
 
-   ret0 = vfs_format(&fs0, NULL);
+   fat_format_parameters.partition_size = 32*1024; //2GB0
+
+   //ret0 = vfs_format(&fs0, &e2_format_parameters);
+   //ret0 = vfs_format(&fs0, &fat_format_parameters);
    ret0 = 0;
    ret1 = vfs_format(&fs1, NULL);
    if(0 == ret0 && 0 == ret1)
@@ -978,6 +986,19 @@ static void vfs_task( void )
    if(ret0 < 0 || ret1 < 0) while(1);
 
    //ASSERT_SEQ(3);
+/***************************************************************/
+/* Test write beyond direct blocks */
+   vfs_unlink("/mount/usb/file0");
+   ret = vfs_open("/mount/usb/file0", &file0, VFS_O_CREAT); if(ret < 0) while(1);
+   test_fill_buffer(buffer, TEST_BUFFER_SIZE);
+   for(i = 0; i<50; i++)
+   {
+      lret = vfs_write(&file0, buffer, TEST_BUFFER_SIZE);
+      if(lret != TEST_BUFFER_SIZE) break;
+   }
+   while(1);
+/***************************************************************/
+
 
    ret = vfs_mkdir("/mount/ram/dir0", 0); if(ret < 0) while(1);
    ret = vfs_mkdir("/mount/ram/dir1", 0); if(ret < 0) while(1);

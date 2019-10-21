@@ -349,8 +349,10 @@ BaseType_t xRc;
 		if( ( pxClient->xTransferSocket != FREERTOS_NO_SOCKET ) && ( pxClient->pcConnectionAck[ 0 ] == '\0' ) )
 		{
 		BaseType_t xClientRc = 0;
-
-		FreeRTOS_printf( ( "xFTPClientWork: ConnAck OK\n" ) );
+		if(pxClient->xTransferSocket != FREERTOS_NO_SOCKET)
+			FreeRTOS_printf( ( "xFTPClientWork: Socket OK\n" ) );
+		if(pxClient->pcConnectionAck[ 0 ] == '\0')
+			FreeRTOS_printf( ( "xFTPClientWork: ConnAck OK\n" ) );
 			//if( pxClient->bits1.bDirHasEntry )
 			if( pxClient->bits1.bisListActive_vfs == pdTRUE_UNSIGNED )
 			{
@@ -373,7 +375,7 @@ BaseType_t xRc;
 
 			if( xClientRc < 0 )
 			{
-				FreeRTOS_printf( ( "xFTPClientWork: Error, closing\n" ) );
+				FreeRTOS_printf( ( "\n\n\n\nxFTPClientWork: Error, closing\n\n\n\n\n" ) );
 				prvTransferCloseSocket( pxClient );
 				prvTransferCloseFile( pxClient );
 				FreeRTOS_printf( ( "xFTPClientWork: Error, closed\n" ) );
@@ -1039,7 +1041,8 @@ BaseType_t xRxSize;
 
 static void prvTransferCloseSocket( FTPClient_t *pxClient )
 {
-	if( pxClient->xTransferSocket != FREERTOS_NO_SOCKET )
+	//if( pxClient->xTransferSocket != FREERTOS_NO_SOCKET )
+	if(0)
 	{
 		/* DEBUGGING ONLY */
 		BaseType_t xRxSize = FreeRTOS_rx_size( pxClient->xTransferSocket );
@@ -1418,7 +1421,8 @@ uint32_t lret;
 		}
 		pxClient->ulRecvBytes += xRc;
 		lret = vfs_write( &(pxClient->pxWriteHandle_vfs), pcBuffer, (uint32_t)xRc );
-		FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 );
+		FreeRTOS_printf( ( "ftp::storeFileWork W: ret: %lu Xrc: %lu\n", lret, xRc ) );
+		FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 ); /* FIXME: Original place */
 		if( lret != (uint32_t)xRc )
 		{
 			FreeRTOS_printf( ( "ftp::storeFileWork fail: xW: %lu Xrc: %lu\n", lret, xRc ) );
@@ -1427,6 +1431,7 @@ uint32_t lret;
 			pxClient->bits1.bHadError = pdTRUE_UNSIGNED;
 			break;
 		}
+		//FreeRTOS_recv( pxClient->xTransferSocket, ( void * ) NULL, xRc, 0 );
 	}
 	return xRc;
 }

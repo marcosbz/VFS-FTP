@@ -356,12 +356,15 @@ static int fat_format(filesystem_info_t *fs, void *param)
    {
       /* TODO: armar fat_path_buffer para mount. Utilizar devnum 0. */
       if( FR_OK == f_mkfs("0:", FM_ANY, 0, fat_mkfs_workingbuffer, 512) )
+      //if( FR_OK == f_mkfs("0:", FM_ANY, 512, fat_mkfs_workingbuffer, 512) )
       {
-         fat_fatfs_desassociate_dev(0);
-         ret = 0;
+         //if( FR_OK == f_setlabel("0:MARCOS") ) /* FIXME: Need to mount drive before setting label */
+         {
+            ret = 0;
+         }
       }
    }
-
+   fat_fatfs_desassociate_dev(0);
    return ret;
 }
 
