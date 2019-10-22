@@ -92,9 +92,7 @@ struct xHTTP_CLIENT
 	char pcCurrentFilename[ ffconfigMAX_FILENAME ];
 	size_t uxBytesLeft;
 	//FF_FILE *pxFileHandle;
-	//FIL pxFileHandle_fatfs; /* FatFS */
 	file_desc_t *pxFileHandle_vfs; /* VFS */
-	uint32_t pxisFileOpen; /* FatFS/VFS */
 	union {
 		struct {
 			uint32_t

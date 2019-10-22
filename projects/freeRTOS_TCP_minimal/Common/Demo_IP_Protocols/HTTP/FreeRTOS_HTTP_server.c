@@ -132,10 +132,12 @@ HTTPClient_t *pxClient = ( HTTPClient_t * ) pxTCPClient;
 static void prvFileClose( HTTPClient_t *pxClient )
 {
 	FreeRTOS_printf( ( "Closing file: %s\n", pxClient->pcCurrentFilename ) );
-	//ff_fclose( pxClient->pxFileHandle );
-	vfs_close(&(pxClient->pxFileHandle_vfs));
-	//pxClient->pxFileHandle = NULL;
-	pxClient->pxisFileOpen = pdFALSE_UNSIGNED;
+	if( pxClient->pxFileHandle_vfs != NULL )
+	{
+		//ff_fclose( pxClient->pxFileHandle );
+		vfs_close(&(pxClient->pxFileHandle_vfs));
+		pxClient->pxFileHandle_vfs = NULL;
+	}
 }
 /*-----------------------------------------------------------*/
 
@@ -308,12 +310,11 @@ int res;
 		FreeRTOS_printf( ( "404 File not found\n" ) );
 		/* "404 File not found". */
 		xRc = prvSendReply( pxClient, WEB_NOT_FOUND );
-		pxClient->pxisFileOpen = pdFALSE_UNSIGNED;
+		pxClient->pxFileHandle_vfs = NULL;
 	}
 	else
 	{
 		FreeRTOS_printf( ( "OK File found\n" ) );
-		pxClient->pxisFileOpen = pdTRUE_UNSIGNED;
 		//pxClient->uxBytesLeft = ( size_t ) pxClient->pxFileHandle->ulFileSize;
 		pxClient->uxBytesLeft = ( size_t ) vfs_size( &(pxClient->pxFileHandle_vfs) );
 		xRc = prvSendFile( pxClient );
@@ -359,8 +360,8 @@ BaseType_t xHTTPClientWork( TCPClient_t *pxTCPClient )
 BaseType_t xRc;
 HTTPClient_t *pxClient = ( HTTPClient_t * ) pxTCPClient;
 
-	if( pxClient->pxisFileOpen == pdTRUE_UNSIGNED )
 	//if( pxClient->pxFileHandle != NULL )
+	if( pxClient->pxFileHandle_vfs != NULL )
 	{
 		prvSendFile( pxClient );
 	}

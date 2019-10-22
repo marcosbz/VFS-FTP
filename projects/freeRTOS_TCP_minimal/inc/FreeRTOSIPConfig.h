@@ -308,7 +308,7 @@ disconnecting stage will timeout after a period of non-activity. */
 
 /* Include support for TCP keep-alive messages. */
 #define ipconfigTCP_KEEP_ALIVE				( 1 )
-#define ipconfigTCP_KEEP_ALIVE_INTERVAL		( 10 ) /* in seconds */
+#define ipconfigTCP_KEEP_ALIVE_INTERVAL		( 2 ) /* in seconds */
 
 #define portINLINE __inline
 
@@ -323,7 +323,7 @@ disconnecting stage will timeout after a period of non-activity. */
 #define ipconfigFTP_RX_ZERO_COPY 1
 
 #define ipconfigUSE_FTP 1
-#define ipconfigUSE_HTTP 0
-#define configHTTP_ROOT "/http"
+#define ipconfigUSE_HTTP 1
+#define configHTTP_ROOT "/mount/ram"
 
 #endif /* FREERTOS_IP_CONFIG_H */
