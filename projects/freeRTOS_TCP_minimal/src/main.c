@@ -113,7 +113,7 @@
 #include "fat.h"
 #include "ooc.h"
 #include "device.h"
-//#include "mmcSPI.h"
+#include "mmcSPI.h"
 #include "storageUSB.h"
 #include "RAMDisk.h"
 //#include "nbdclient.h"
@@ -342,6 +342,7 @@ const uint32_t ulLongTime_ms = 250UL;
    // Inicializar y configurar la plataforma
    Chip_SetupCoreClock(CLKIN_IRC, 77000000, true);
    boardConfig();
+   spiConfig( SPI0 );
    //Chip_SetupCoreClock(CLKIN_IRC, 77000000, true);
    EMC_Initialize();
 
@@ -891,18 +892,18 @@ void HardFault_Handler(void)
 
 static void vfs_task( void )
 {
-   //MmcSPI mmc0;
+   MmcSPI mmc0;
    StorageUSB usb0;
    //Nbd nbd0;
    RAMDisk ram0;
-   filesystem_info_t *fs0, *fs1;
+   filesystem_info_t *fs0, *fs1, *fs2;
    file_desc_t *file0, *file1, *file2, *file3, *file4, *file5, *file6, *file7;
 
    uint8_t buffer[TEST_BUFFER_SIZE];
    fat_format_param_t fat_format_parameters;
    ext2_format_param_t e2_format_parameters;
 
-   int32_t ret, ret0, ret1;
+   int32_t ret, ret0, ret1, ret2;
    uint32_t lret;
    uint32_t i;
 
@@ -921,21 +922,21 @@ static void vfs_task( void )
     */
 
    /* Create device and initialize it */
-   //ooc_init_class(MmcSPI);
+   ooc_init_class(MmcSPI);
    ooc_init_class(StorageUSB);
    //ooc_init_class(Nbd);
    ooc_init_class(RAMDisk);
 
-   //mmc0 = mmcSPI_new(); if(NULL == mmc0) while(1);
+   mmc0 = mmcSPI_new(); if(NULL == mmc0) while(1);
    usb0 = storageUSB_new(); if(NULL == usb0) while(1);
    //nbd0 = nbd_new(); if(NULL == nbd0) while(1);
    ram0 = RAMDisk_new(); if(NULL == ram0) while(1);
 
    ret0 = RAMDisk_init(ram0, (void *)ucRAMDisk, mainRAM_DISK_SECTORS); //if(ret < 0) while(1);
    ret1 = storageUSB_init(usb0); //if(ret < 0) while(1);
-   //ret = mmcSPI_init(mmc0); //if(ret < 0) while(1);
+   ret2 = mmcSPI_init(mmc0); //if(ret < 0) while(1);
    //ret = nbd_init(nbd0); //if(ret < 0) while(1);
-   if(0 == ret0 && 0 == ret1)
+   if(0 == ret0 && 0 == ret1 && 0 == ret2)
    {
       // Turn ON LEDG if the write operation was successful
       gpioWrite( DO4, ON );
@@ -947,11 +948,11 @@ static void vfs_task( void )
    }
 
    /* Create file system object with device and fs driver */
-   //ret = filesystem_create(&fs, (Device *) &mmc0, &fat_driver); if(ret < 0) while(1);
-   //ret0 = filesystem_create(&fs0, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
-   ret0 = filesystem_create(&fs0, (Device *) &usb0, &ext2_driver); if(ret < 0) while(1);
+   ret0 = filesystem_create(&fs0, (Device *) &mmc0, &ext2_driver); if(ret < 0) while(1);
+   ret1 = filesystem_create(&fs1, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
+   //ret0 = filesystem_create(&fs0, (Device *) &usb0, &ext2_driver); if(ret < 0) while(1);
    //ret = filesystem_create(&fs, (Device *) &nbd0, &fat_driver); if(ret < 0) while(1);
-   ret1 = filesystem_create(&fs1, (Device *) &ram0, &fat_driver); if(ret < 0) while(1);
+   ret2 = filesystem_create(&fs2, (Device *) &ram0, &fat_driver); if(ret < 0) while(1);
 
    /* format */
    /* Set ext2 format parameters */
@@ -964,8 +965,9 @@ static void vfs_task( void )
    //ret0 = vfs_format(&fs0, &e2_format_parameters);
    //ret0 = vfs_format(&fs0, &fat_format_parameters);
    ret0 = 0;
-   ret1 = vfs_format(&fs1, NULL);
-   if(0 == ret0 && 0 == ret1)
+   ret1 = 0;
+   ret2 = vfs_format(&fs2, NULL);
+   if(0 == ret0 && 0 == ret1 && 0 == ret2)
    {
       // Turn ON LEDG if the write operation was successful
       gpioWrite( DO5, ON );
@@ -981,22 +983,26 @@ static void vfs_task( void )
 
    //ASSERT_SEQ(2);
 
-   ret0 = vfs_mount("/mount/usb", &fs0);
-   ret1 = vfs_mount("/mount/ram", &fs1);
-   if(ret0 < 0 || ret1 < 0) while(1);
+   ret0 = vfs_mount("/mount/sd", &fs0);
+   ret1 = vfs_mount("/mount/usb", &fs1);
+   ret2 = vfs_mount("/mount/ram", &fs2);
+   if(ret0 < 0 || ret1 < 0 || ret2 < 0) while(1);
 
    //ASSERT_SEQ(3);
 /***************************************************************/
 /* Test write beyond direct blocks */
 /*
-   vfs_unlink("/mount/usb/file0");
-   ret = vfs_open("/mount/usb/file0", &file0, VFS_O_CREAT); if(ret < 0) while(1);
+   //vfs_unlink("/mount/usb/file0");
+   //ret = vfs_open("/mount/usb/file0", &file0, VFS_O_CREAT); if(ret < 0) while(1);
    test_fill_buffer(buffer, TEST_BUFFER_SIZE);
+   vfs_unlink("/mount/sd/file0");
+   ret = vfs_open("/mount/sd/file0", &file0, VFS_O_CREAT); if(ret < 0) while(1);
    for(i = 0; i<50; i++)
    {
       lret = vfs_write(&file0, buffer, TEST_BUFFER_SIZE);
       if(lret != TEST_BUFFER_SIZE) break;
    }
+   gpioWrite( DO6, ON );
    while(1);
 */
 /***************************************************************/

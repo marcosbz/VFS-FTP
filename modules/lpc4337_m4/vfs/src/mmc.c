@@ -7,7 +7,7 @@
 
 
 #include "board.h"
-#include "diskio.h"
+#include "ff.h"
 #include "mmc_diskio.h"
 
 /* Definitions for MMC/SDC command */
@@ -32,10 +32,11 @@
 #define BOOL 	bool
 
 /* Port Controls  (Platform dependent) */
-#define CS_LOW()    Chip_GPIO_SetPinOutLow(LPC_GPIO_PORT, 3, 0)
-#define CS_HIGH()   Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, 3, 0)
+#define CS_LOW()    Chip_GPIO_SetPinOutLow(LPC_GPIO_PORT, 5, 15)
+#define CS_HIGH()   Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, 5, 15)
 
 #define	FCLK_SLOW()   Chip_SSP_SetBitRate(LPC_SSP1, 10000);	/* Set slow clock (100k-400k) */
+//#define	FCLK_FAST()   Chip_SSP_SetBitRate(LPC_SSP1, 400000);	/* Set fast clock (depends on the CSD) */
 #define	FCLK_FAST()   Chip_SSP_SetBitRate(LPC_SSP1, 400000);	/* Set fast clock (depends on the CSD) */
 
 
@@ -46,10 +47,10 @@
 ---------------------------------------------------------------------------*/
 
 static volatile
-DSTATUS Stat = STA_NOINIT;	/* Disk status */
+DSTATUS mmc_Stat = STA_NOINIT;	/* Disk status */
 
 static volatile
-BYTE Timer1, Timer2;	/* 100Hz decrement timer */
+BYTE mmc_Timer1, mmc_Timer2;	/* 100Hz decrement timer */
 
 static
 BYTE CardType;			/* Card type flags */
@@ -126,11 +127,11 @@ BYTE wait_ready (void)
 	BYTE res;
 
 
-	Timer2 = 50;	/* Wait for ready in timeout of 500ms */
+	mmc_Timer2 = 50;	/* Wait for ready in timeout of 500ms */
 	rcvr_spi();
 	do
 		res = rcvr_spi();
-	while ((res != 0xFF) && Timer2);
+	while ((res != 0xFF) && mmc_Timer2);
 
 	return res;
 }
@@ -204,10 +205,10 @@ BOOL rcvr_datablock (
 	BYTE token;
 
 
-	Timer1 = 20;
+	mmc_Timer1 = 20;
 	do {							/* Wait for data packet in timeout of 200ms */
 		token = rcvr_spi();
-	} while ((token == 0xFF) && Timer1);
+	} while ((token == 0xFF) && mmc_Timer1);
 	if(token != 0xFE) return FALSE;	/* If not valid data token, retutn with error */
 
 	do {							/* Receive the data block into buffer */
@@ -326,7 +327,7 @@ DSTATUS mmc_disk_initialize (
 	uint32_t delay;
 
 	if (drv) return STA_NOINIT;			/* Supports only single drive */
-	if (Stat & STA_NODISK) return Stat;	/* No card in the socket */
+	if (mmc_Stat & STA_NODISK) return mmc_Stat;	/* No card in the socket */
 
 	CS_HIGH();
 	power_on();							/* Force socket power on */
@@ -345,12 +346,12 @@ DSTATUS mmc_disk_initialize (
 		while(delay--);
 	}
 	if (ret == 1) {			/* Enter Idle state */
-		Timer1 = 100;						/* Initialization timeout of 1000 msec */
+		mmc_Timer1 = 100;						/* Initialization timeout of 1000 msec */
 		if (send_cmd(CMD8, 0x1AA) == 1) {	/* SDHC */
 			for (n = 0; n < 4; n++) ocr[n] = rcvr_spi();		/* Get trailing return value of R7 resp */
 			if (ocr[2] == 0x01 && ocr[3] == 0xAA) {				/* The card can work at vdd range of 2.7-3.6V */
-				while (Timer1 && send_cmd(ACMD41, 1UL << 30));	/* Wait for leaving idle state (ACMD41 with HCS bit) */
-				if (Timer1 && send_cmd(CMD58, 0) == 0) {		/* Check CCS bit in the OCR */
+				while (mmc_Timer1 && send_cmd(ACMD41, 1UL << 30));	/* Wait for leaving idle state (ACMD41 with HCS bit) */
+				if (mmc_Timer1 && send_cmd(CMD58, 0) == 0) {		/* Check CCS bit in the OCR */
 					for (n = 0; n < 4; n++) ocr[n] = rcvr_spi();
 					ty = (ocr[0] & 0x40) ? CT_SD2 | CT_BLOCK : CT_SD2;	/* SDv2 */
 				}
@@ -361,8 +362,8 @@ DSTATUS mmc_disk_initialize (
 			} else {
 				ty = CT_MMC; cmd = CMD1;	/* MMCv3 */
 			}
-			while (Timer1 && send_cmd(cmd, 0));			/* Wait for leaving idle state */
-			if (!Timer1 || send_cmd(CMD16, 512) != 0)	/* Set R/W block length to 512 */
+			while (mmc_Timer1 && send_cmd(cmd, 0));			/* Wait for leaving idle state */
+			if (!mmc_Timer1 || send_cmd(CMD16, 512) != 0)	/* Set R/W block length to 512 */
 				ty = 0;
 		}
 	}
@@ -370,13 +371,13 @@ DSTATUS mmc_disk_initialize (
 	deselect();
 
 	if (ty) {			/* Initialization succeded */
-		Stat &= ~STA_NOINIT;		/* Clear STA_NOINIT */
+		mmc_Stat &= ~STA_NOINIT;		/* Clear STA_NOINIT */
 		FCLK_FAST();
 	} else {			/* Initialization failed */
 		power_off();
 	}
 
-	return Stat;
+	return mmc_Stat;
 }
 
 
@@ -390,7 +391,7 @@ DSTATUS mmc_disk_status (
 )
 {
 	if (drv) return STA_NOINIT;		/* Supports only single drive */
-	return Stat;
+	return mmc_Stat;
 }
 
 
@@ -407,7 +408,7 @@ DRESULT mmc_disk_read (
 )
 {
 	if (drv || !count) return RES_PARERR;
-	if (Stat & STA_NOINIT) return RES_NOTRDY;
+	if (mmc_Stat & STA_NOINIT) return RES_NOTRDY;
 
 	if (!(CardType & CT_BLOCK)) sector *= 512;	/* Convert to byte address if needed */
 
@@ -445,8 +446,8 @@ DRESULT mmc_disk_write (
 )
 {
 	if (drv || !count) return RES_PARERR;
-	if (Stat & STA_NOINIT) return RES_NOTRDY;
-	if (Stat & STA_PROTECT) return RES_WRPRT;
+	if (mmc_Stat & STA_NOINIT) return RES_NOTRDY;
+	if (mmc_Stat & STA_PROTECT) return RES_WRPRT;
 
 	if (!(CardType & CT_BLOCK)) sector *= 512;	/* Convert to byte address if needed */
 
@@ -514,7 +515,7 @@ DRESULT mmc_disk_ioctl (
 		}
 	}
 	else {
-		if (Stat & STA_NOINIT) return RES_NOTRDY;
+		if (mmc_Stat & STA_NOINIT) return RES_NOTRDY;
 
 		switch (ctrl) {
 		case CTRL_SYNC :		/* Make sure that no pending write process. Do not remove this or written sector might not left updated. */
@@ -621,10 +622,10 @@ void mmc_disk_timerproc (void)
 	BYTE n, s;
 
 
-	n = Timer1;						/* 100Hz decrement timer */
-	if (n) Timer1 = --n;
-	n = Timer2;
-	if (n) Timer2 = --n;
+	n = mmc_Timer1;						/* 100Hz decrement timer */
+	if (n) mmc_Timer1 = --n;
+	n = mmc_Timer2;
+	if (n) mmc_Timer2 = --n;
 
 	n = pv;
 	//pv = SOCKPORT & (SOCKWP | SOCKINS);	/* Sample socket switch */
@@ -634,7 +635,7 @@ void mmc_disk_timerproc (void)
 	pv = (Chip_GPIO_GetPinState(LPC_GPIO_PORT, 2, 11) != 0);
 
 	if (n == pv) {					/* Have contacts stabled? */
-		s = Stat;
+		s = mmc_Stat;
 
 		/* write protect NOT supported */
 
@@ -644,7 +645,7 @@ void mmc_disk_timerproc (void)
 		else				       /* (Card inserted) */
 			s &= ~STA_NODISK;
 
-		Stat = s;
+		mmc_Stat = s;
 	}
 }
 

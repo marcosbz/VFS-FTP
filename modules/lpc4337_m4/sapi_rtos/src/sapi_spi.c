@@ -68,12 +68,15 @@ bool_t spiConfig( spiMap_t spi ){
 		Chip_SCU_PinMuxSet(0x1, 3, (SCU_MODE_PULLUP | SCU_MODE_INBUFF_EN | SCU_MODE_ZIF_DIS | SCU_MODE_FUNC5)); // MISO1
 		Chip_SCU_PinMuxSet(0x1, 4, (SCU_MODE_PULLUP | SCU_MODE_FUNC5)); // MOSI1
 
-		Chip_SCU_PinMuxSet(0x6, 1, (SCU_MODE_PULLUP | SCU_MODE_FUNC0)); // CS1 configured as GPIO
-		Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, 3, 0);
+		//Chip_SCU_PinMuxSet(0x6, 1, (SCU_MODE_PULLUP | SCU_MODE_FUNC0)); // CS1 configured as GPIO
+		Chip_SCU_PinMuxSet(0x6, 7, (SCU_MODE_PULLUP | SCU_MODE_FUNC0)); // CS1 configured as GPIO
+		//Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, 3, 0);
+		Chip_GPIO_SetPinDIROutput(LPC_GPIO_PORT, 5, 15);
 
       // Initialize SSP Peripheral
       Chip_SSP_Init( LPC_SSP1 );
       Chip_SSP_Enable( LPC_SSP1 );
+      Chip_SSP_SetBitRate(LPC_SSP1, 10000);
 
    } else{
       retVal = FALSE;
