@@ -24,13 +24,15 @@
 #define OOC_H
 
 #include <stddef.h>
+#include "lpc_types.h"
 
 /* Definitions in conflict with typedef enum {FALSE = 0, TRUE = !FALSE} Bool; */
+/*
 #ifndef FALSE
 #define FALSE   0
 #define TRUE (! FALSE)
 #endif
-
+*/
 /* Include environment specific definitions
  */
 

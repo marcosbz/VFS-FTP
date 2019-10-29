@@ -74,10 +74,17 @@ FIXME:
 /*==================[inclusions]=============================================*/
 #include <string.h>
 #include <stdbool.h>
+#include "ooc.h"
 #include "vfs.h"
 #include "tlsf.h"
-#include "ooc.h"
+//#include "ooc.h"
 #include "device.h"
+/* FreeRTOS includes. */
+#include <FreeRTOS.h>
+#include "task.h"
+#include "timers.h"
+#include "queue.h"
+#include "semphr.h"
 
 /*==================[macros and definitions]=================================*/
 
@@ -184,6 +191,14 @@ static file_desc_t *file_desc_get(uint16_t index);
 #endif
 
 /*==================[internal data definition]===============================*/
+
+/** \brief VFS mutex handle
+ *
+ * See the VFS as a unique resource, so should sync usage with this mutex. Every function in API takes and releases mutex.
+ * Initialized in vfs_init()
+ *
+ */
+SemaphoreHandle_t vfs_mutex = NULL;
 
 /** \brief Root inode
  *
@@ -664,9 +679,20 @@ extern int vfs_delete_child(vnode_t *child)
    return 0;
 }
 
+/********************************************************************************/
+/* API */
+/********************************************************************************/
+
+/* FIXME: Memory leaks when failure */
 extern int vfs_init(void)
 {
    int ret;
+
+   vfs_mutex = xSemaphoreCreateMutex();
+   if(NULL == vfs_mutex)
+   {
+      return -1;
+   }
 
    memset(fs_arena_area, 0, sizeof(fs_arena_area));
    fs_mem_handle = tlsf_create_with_pool((void *)fs_arena_area, sizeof(fs_arena_area));
@@ -723,17 +749,21 @@ extern int vfs_init(void)
  */
 extern int vfs_format(filesystem_info_t **fs, void *param)
 {
-   int ret;
-
-   /* Llamo a la funcion de bajo nivel */
-   ret = (*fs)->drv->driver_op->fs_format(*fs, param);
-   ASSERT_MSG(0 == ret, "format(): Lower layer format failed");
-   if(ret)
+   int ret = -1;
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Fallo el format de bajo nivel */
-      return -1;
-   }
-   return 0;
+	   /* Llamo a la funcion de bajo nivel */
+	   ret = (*fs)->drv->driver_op->fs_format(*fs, param);
+	   ASSERT_MSG(0 == ret, "format(): Lower layer format failed");
+	   if(ret)
+	   {
+	      /* Fallo el format de bajo nivel */
+	      return -1;
+	   }
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
+   }   
+   return ret;
 }
 
 /** \brief VFS mount
@@ -744,39 +774,44 @@ extern int vfs_format(filesystem_info_t **fs, void *param)
 extern int vfs_mount(char *target_path, filesystem_info_t **fs)
 {
    char *tpath;
-   int ret;
+   int ret = -1;
    vnode_t *targetnode;
 
-   tpath = target_path;
-   /* Reserve vnode for the mountpoint */
-   ret = vfs_inode_reserve(tpath, &targetnode);
-   ASSERT_MSG(0 == ret, "mount(): vfs_inode_reserve() failed creating target node");
-   if(ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* The directory already exists */
-      /* FIXME: It should not be needed that the dir doesnt exist.
-       * Should overwrite new mount in node
-       */
-      return -1;
-   }
-   /* Set filesystem information in new node */
-   targetnode->fs_info = *fs;
-   ASSERT_MSG(NULL != targetnode->fs_info, "vfs_mount(): Could not create mountpoint fsinfo");
-   if (NULL == targetnode->fs_info)
-   {
-      return -1;
-   }
+	   tpath = target_path;
+	   /* Reserve vnode for the mountpoint */
+	   ret = vfs_inode_reserve(tpath, &targetnode);
+	   ASSERT_MSG(0 == ret, "mount(): vfs_inode_reserve() failed creating target node");
+	   if(ret)
+	   {
+	      /* The directory already exists */
+	      /* FIXME: It should not be needed that the dir doesnt exist.
+	       * Should overwrite new mount in node
+	       */
+	      return -1;
+	   }
+	   /* Set filesystem information in new node */
+	   targetnode->fs_info = *fs;
+	   ASSERT_MSG(NULL != targetnode->fs_info, "vfs_mount(): Could not create mountpoint fsinfo");
+	   if (NULL == targetnode->fs_info)
+	   {
+	      return -1;
+	   }
 
-   targetnode->f_info.is_mount_dir = true;
-   /* Call the lower layer method */
-   ret = (*fs)->drv->driver_op->fs_mount(*fs, targetnode);
-   ASSERT_MSG(0 == ret, "mount(): Lower layer mount failed");
-   if(ret)
-   {
-      /* Lower layer mount failed */
-      return -1;
+	   targetnode->f_info.is_mount_dir = true;
+	   /* Call the lower layer method */
+	   ret = (*fs)->drv->driver_op->fs_mount(*fs, targetnode);
+	   ASSERT_MSG(0 == ret, "mount(): Lower layer mount failed");
+	   if(ret)
+	   {
+	      /* Lower layer mount failed */
+	      return -1;
+	   }
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
    }
-   return 0;
+   return ret;
 }
 
 /* Cant support over mounting. Directory must be empty to mount.
@@ -787,53 +822,57 @@ extern int vfs_umount(const char *target_path)
 {
    char *tpath;
    filesystem_driver_t *fs_driver;
-   int ret;
+   int ret = -1;
    vnode_t *targetnode;
 
-   tpath = (char *)target_path;
-   ret = vfs_inode_search(&tpath, &targetnode);
-   ASSERT_MSG(0 == ret, "umount(): vfs_inode_search() failed. Mountpoint doesnt exist");
-   if(ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* The device node doesnt exist */
-      return -1;
-   }
-   ASSERT_MSG(true == targetnode->f_info.is_mount_dir, "umount(): Target not a mountpoint");
-   if(true != targetnode->f_info.is_mount_dir)
-   {
-      /* Not a mountpoint */
-      return -1;
-   }
-   /* Files under this mount still in use. Close them before umount */
-   ASSERT_MSG(0 == targetnode->fs_info->ref_count, "umount(): Mountpoint still in use, cant umount");
-   if(0 != targetnode->fs_info->ref_count)
-   {
-      return -1;
-   }
-   /* Call the lower layer method */
-   fs_driver = targetnode->fs_info->drv;
-   if(NULL == fs_driver->driver_op->fs_umount)
-   {
-      /* method not supported */
-      return -1;
-   }
-   ret = fs_driver->driver_op->fs_umount(targetnode);
-   ASSERT_MSG(0 == ret, "mount(): Lower layer mount failed");
-   if(ret)
-   {
-      /* Lower layer mount failed */
-      return -1;
-   }
+	   tpath = (char *)target_path;
+	   ret = vfs_inode_search(&tpath, &targetnode);
+	   ASSERT_MSG(0 == ret, "umount(): vfs_inode_search() failed. Mountpoint doesnt exist");
+	   if(ret)
+	   {
+	      /* The device node doesnt exist */
+	      return -1;
+	   }
+	   ASSERT_MSG(true == targetnode->f_info.is_mount_dir, "umount(): Target not a mountpoint");
+	   if(true != targetnode->f_info.is_mount_dir)
+	   {
+	      /* Not a mountpoint */
+	      return -1;
+	   }
+	   /* Files under this mount still in use. Close them before umount */
+	   ASSERT_MSG(0 == targetnode->fs_info->ref_count, "umount(): Mountpoint still in use, cant umount");
+	   if(0 != targetnode->fs_info->ref_count)
+	   {
+	      return -1;
+	   }
+	   /* Call the lower layer method */
+	   fs_driver = targetnode->fs_info->drv;
+	   if(NULL == fs_driver->driver_op->fs_umount)
+	   {
+	      /* method not supported */
+	      return -1;
+	   }
+	   ret = fs_driver->driver_op->fs_umount(targetnode);
+	   ASSERT_MSG(0 == ret, "mount(): Lower layer mount failed");
+	   if(ret)
+	   {
+	      /* Lower layer mount failed */
+	      return -1;
+	   }
 
-   /* Delete mountpoint vnode */
-   ret = vfs_delete_child(targetnode);
-   ASSERT_MSG(0 == ret, "vfs_umount(): vfs_delete_child() failed");
-   if(ret)
-   {
-      return -1;
+	   /* Delete mountpoint vnode */
+	   ret = vfs_delete_child(targetnode);
+	   ASSERT_MSG(0 == ret, "vfs_umount(): vfs_delete_child() failed");
+	   if(ret)
+	   {
+	      return -1;
+	   }
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
    }
-
-   return 0;
+   return ret;
 }
 
 /*
@@ -842,27 +881,31 @@ extern int vfs_umount(const char *target_path)
 extern int vfs_mkdir(const char *dir_path, mode_t mode)
 {
    vnode_t *dir_inode_p;
-   int               ret;
+   int ret = -1;
 
-   char *tpath = (char *) dir_path;
-   /* Create an empty node in dir_path */
-   /* vfs_inode_reserve(): The new node inherits the fathers fs info */
-   ret = vfs_inode_reserve(tpath, &dir_inode_p);
-   if(0 > ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Directory already exists or path is invalid */
-      return -1;
+	   char *tpath = (char *) dir_path;
+	   /* Create an empty node in dir_path */
+	   /* vfs_inode_reserve(): The new node inherits the fathers fs info */
+	   ret = vfs_inode_reserve(tpath, &dir_inode_p);
+	   if(0 > ret)
+	   {
+	      /* Directory already exists or path is invalid */
+	      return -1;
+	   }
+	   /* Fill the vnode fields */
+	   dir_inode_p->f_info.type = VFS_FTDIR;
+	   ret = dir_inode_p->fs_info->drv->driver_op->fs_create_node(dir_inode_p->parent_node, dir_inode_p);
+	   if(ret)
+	   {
+	      /* Could not create lower layer node. Handle the issue */
+	      return -1;
+	   }
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
    }
-   /* Fill the vnode fields */
-   dir_inode_p->f_info.type = VFS_FTDIR;
-   ret = dir_inode_p->fs_info->drv->driver_op->fs_create_node(dir_inode_p->parent_node, dir_inode_p);
-   if(ret)
-   {
-      /* Could not create lower layer node. Handle the issue */
-      return -1;
-   }
-
-   return 0;
+   return ret;
 }
 
 /* FIXME: Check if it is a directory before deleting */
@@ -871,70 +914,75 @@ extern int vfs_rmdir(const char *dir_path)
 {
    vnode_t *target_inode;
    filesystem_driver_t *driver;
-   int               ret;
+   int ret = -1;
    char *auxpath;
 
-   auxpath = (char *) dir_path;
-   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
-   ASSERT_MSG(0 == ret, "vfs_rmdir(): vfs_inode_search() failed. Device doesnt exist");
-   if(ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* The directory doesnt exist */
-      return -1;
-   }
-   /* Check if this is the root inode */
-   if(NULL == target_inode->parent_node)
-   {
-      /* Cannot erase root */
-      return -1;
-   }
-   /* Check if this iss a directory */
-   ASSERT_MSG(VFS_FTDIR == target_inode->f_info.type, "vfs_rmdir(): not a directory file");
-   if(VFS_FTDIR != target_inode->f_info.type)
-   {
-      /* Not a regular file, can not unlink */
-      return -1;
-   }
-   /* Check if this directory still has children */
-   ASSERT_MSG(NULL == target_inode->child_node, "vfs_rmdir(): Directory still has children. Cant delete");
-   if(NULL != target_inode->child_node)
-   {
-      /* Cant delete directory with children */
-      return -1;
-   }
-   /* Check FS driver */
-   driver = target_inode->fs_info->drv;
-   ASSERT_MSG(NULL != driver, "vfs_rmdir(): driver not available");
-   if(NULL == driver)
-   {
-      /*No driver. Fatal error*/
-      return -1;
-   }
-   /* Check driver operation */
-   ASSERT_MSG(NULL != driver->driver_op->fs_delete_node, "vfs_rmdir(): delete op not available");
-   if(NULL == driver->driver_op->fs_delete_node)
-   {
-      /*The filesystem driver does not support this method*/
-      return -1;
-   }
-   /* Call low layer delete function */
-   ret = driver->driver_op->fs_delete_node(target_inode->parent_node, target_inode);
-   ASSERT_MSG(0 == ret, "vfs_rmdir(): lower layer unlink failed");
-   if(ret)
-   {
-      /* Filesystem op failed */
-      return -1;
-   }
-   /* TODO: Remove node from vfs */
-   ret = vfs_delete_child(target_inode);
-   ASSERT_MSG(0 == ret, "vfs_rmdir(): vfs_delete_child() failed");
-   if(ret)
-   {
-      /* Filesystem op failed */
-      return -1;
-   }
+	   auxpath = (char *) dir_path;
+	   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
+	   ASSERT_MSG(0 == ret, "vfs_rmdir(): vfs_inode_search() failed. Device doesnt exist");
+	   if(ret)
+	   {
+	      /* The directory doesnt exist */
+	      return -1;
+	   }
+	   /* Check if this is the root inode */
+	   if(NULL == target_inode->parent_node)
+	   {
+	      /* Cannot erase root */
+	      return -1;
+	   }
+	   /* Check if this iss a directory */
+	   ASSERT_MSG(VFS_FTDIR == target_inode->f_info.type, "vfs_rmdir(): not a directory file");
+	   if(VFS_FTDIR != target_inode->f_info.type)
+	   {
+	      /* Not a regular file, can not unlink */
+	      return -1;
+	   }
+	   /* Check if this directory still has children */
+	   ASSERT_MSG(NULL == target_inode->child_node, "vfs_rmdir(): Directory still has children. Cant delete");
+	   if(NULL != target_inode->child_node)
+	   {
+	      /* Cant delete directory with children */
+	      return -1;
+	   }
+	   /* Check FS driver */
+	   driver = target_inode->fs_info->drv;
+	   ASSERT_MSG(NULL != driver, "vfs_rmdir(): driver not available");
+	   if(NULL == driver)
+	   {
+	      /*No driver. Fatal error*/
+	      return -1;
+	   }
+	   /* Check driver operation */
+	   ASSERT_MSG(NULL != driver->driver_op->fs_delete_node, "vfs_rmdir(): delete op not available");
+	   if(NULL == driver->driver_op->fs_delete_node)
+	   {
+	      /*The filesystem driver does not support this method*/
+	      return -1;
+	   }
+	   /* Call low layer delete function */
+	   ret = driver->driver_op->fs_delete_node(target_inode->parent_node, target_inode);
+	   ASSERT_MSG(0 == ret, "vfs_rmdir(): lower layer unlink failed");
+	   if(ret)
+	   {
+	      /* Filesystem op failed */
+	      return -1;
+	   }
+	   /* TODO: Remove node from vfs */
+	   ret = vfs_delete_child(target_inode);
+	   ASSERT_MSG(0 == ret, "vfs_rmdir(): vfs_delete_child() failed");
+	   if(ret)
+	   {
+	      /* Filesystem op failed */
+	      return -1;
+	   }
 
-   return 0;
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
+   }
+   return ret;
 }
 
 /*
@@ -944,164 +992,187 @@ extern int vfs_open(const char *path, file_desc_t **file, int flags)
 {
    vnode_t *target_inode, *parent_inode;
    char *auxpath;
-   int ret;
+   int ret = -1;
 
-   *file = NULL;
-   auxpath = (char *) path;
-   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
-   if (ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Node does not exist. Must create a new file if VFS_O_CREAT set */
-      if (flags & VFS_O_CREAT)
-      {
-         /* Create empty node in dir_path */
-         /* vfs_inode_reserve(): The new node inherits the fathers fs info */
-         auxpath= (char *)path;
-         ret = vfs_inode_reserve(auxpath, &target_inode);
-         ASSERT_MSG(NULL != target_inode, "open(): vfs_inode_reserve() failed");
-         if(NULL == target_inode)
-         {
-            /* Error when allocating node */
-            return -1;
-         }
-         target_inode->f_info.type = VFS_FTREG;
-         /* Create node in lower layer */
-         parent_inode = target_inode->parent_node;
-         ret = target_inode->fs_info->drv->driver_op->fs_create_node(parent_inode, target_inode);
-         ASSERT_MSG(ret>=0, "open(): fs_create_node() failed");
-         if(ret)
-         {
-            /* Could not create lower layer node. Handle the issue */
-            return -1;
-         }
-      }
-      else
-      {
-         /* Node does not exist, but VFS_O_CREAT not set. Error */
-         return -1;
-      }
-   }
-   else      /* El nodo ya existe, no hay que crearlo, solo abrir el archivo */
-   {
-      /* Node exists. Only open the file.
-       * If O_CREAT was set, if the file already exists it is an error.
-       */
-      if ((flags & VFS_O_EXCL) && (flags & VFS_O_CREAT))
-      {
-         return -1;
-      }
-      /* TODO: Contemplate more cases of filetypes */
-      if(VFS_FTDIR == target_inode->f_info.type || VFS_FTUNKNOWN == target_inode->f_info.type)
-      {
-         return -1;
-      }
-   }
+	   *file = NULL;
+	   auxpath = (char *) path;
+	   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
+	   if (ret)
+	   {
+	      /* Node does not exist. Must create a new file if VFS_O_CREAT set */
+	      if (flags & VFS_O_CREAT)
+	      {
+		 /* Create empty node in dir_path */
+		 /* vfs_inode_reserve(): The new node inherits the fathers fs info */
+		 auxpath= (char *)path;
+		 ret = vfs_inode_reserve(auxpath, &target_inode);
+		 ASSERT_MSG(NULL != target_inode, "open(): vfs_inode_reserve() failed");
+		 if(NULL == target_inode)
+		 {
+		    /* Error when allocating node */
+		    return -1;
+		 }
+		 target_inode->f_info.type = VFS_FTREG;
+		 /* Create node in lower layer */
+		 parent_inode = target_inode->parent_node;
+		 ret = target_inode->fs_info->drv->driver_op->fs_create_node(parent_inode, target_inode);
+		 ASSERT_MSG(ret>=0, "open(): fs_create_node() failed");
+		 if(ret)
+		 {
+		    /* Could not create lower layer node. Handle the issue */
+		    return -1;
+		 }
+	      }
+	      else
+	      {
+		 /* Node does not exist, but VFS_O_CREAT not set. Error */
+		 return -1;
+	      }
+	   }
+	   else      /* El nodo ya existe, no hay que crearlo, solo abrir el archivo */
+	   {
+	      /* Node exists. Only open the file.
+	       * If O_CREAT was set, if the file already exists it is an error.
+	       */
+	      if ((flags & VFS_O_EXCL) && (flags & VFS_O_CREAT))
+	      {
+		 return -1;
+	      }
+	      /* TODO: Contemplate more cases of filetypes */
+	      if(VFS_FTDIR == target_inode->f_info.type || VFS_FTUNKNOWN == target_inode->f_info.type)
+	      {
+		 return -1;
+	      }
+	   }
 
-   *file = file_desc_create(target_inode);
-   ASSERT_MSG(NULL != *file, "open(): file_desc_create() failed");
-   if(NULL == *file)
-   {
-      return -1;
-   }
-   ret = (*file)->node->fs_info->drv->driver_op->file_open(*file);
-   ASSERT_MSG(ret >= 0, "open(): file_open() failed");
-   if(ret)
-   {
-      file_desc_destroy(*file);
-      *file = NULL;
-      return -1;
-   }
+	   *file = file_desc_create(target_inode);
+	   ASSERT_MSG(NULL != *file, "open(): file_desc_create() failed");
+	   if(NULL == *file)
+	   {
+	      return -1;
+	   }
+	   ret = (*file)->node->fs_info->drv->driver_op->file_open(*file);
+	   ASSERT_MSG(ret >= 0, "open(): file_open() failed");
+	   if(ret)
+	   {
+	      file_desc_destroy(*file);
+	      *file = NULL;
+	      return -1;
+	   }
 
-   //printf("vfs_open(): filename: %.*s refcount: %d\n", (*file)->node->f_info.file_namlen,
-                     //(*file)->node->f_info.file_name, (*file)->node->f_info.ref_count);
-   (*file)->node->fs_info->ref_count++;
-   (*file)->node->f_info.ref_count++;
-   return 0;
+	   //printf("vfs_open(): filename: %.*s refcount: %d\n", (*file)->node->f_info.file_namlen,
+		             //(*file)->node->f_info.file_name, (*file)->node->f_info.ref_count);
+	   (*file)->node->fs_info->ref_count++;
+	   (*file)->node->f_info.ref_count++;
+
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
+   }
+   return ret;
 }
 
 extern int vfs_close(file_desc_t **file)
 {
    vnode_t *node;
-   ssize_t ret;
+   int ret = -1;
 
-   /* Assert the file descriptor */
-   ASSERT_MSG(NULL != *file, "vfs_close(): invalid file_desc_get()");
-   if(NULL == *file)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Invalid file descriptor */
-      return -1;
+	   /* Assert the file descriptor */
+	   ASSERT_MSG(NULL != *file, "vfs_close(): invalid file_desc_get()");
+	   if(NULL == *file)
+	   {
+	      /* Invalid file descriptor */
+	      return -1;
+	   }
+
+	   node = (*file)->node;
+	   ret = file_desc_destroy(*file); //Aca hay un problema. FIXME. Cambia la info del nodo
+	   ASSERT_MSG(0 == ret, "vfs_close(): file_desc_destroy() failed");
+	   if(ret)
+	   {
+	      return -1;
+	   }
+	   *file = NULL;
+
+	   node->fs_info->ref_count--;
+	   node->f_info.ref_count--;
+
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
    }
 
-   node = (*file)->node;
-   ret = file_desc_destroy(*file); //Aca hay un problema. FIXME. Cambia la info del nodo
-   ASSERT_MSG(0 == ret, "vfs_close(): file_desc_destroy() failed");
-   if(ret)
-   {
-      return -1;
-   }
-   *file = NULL;
-
-   node->fs_info->ref_count--;
-   node->f_info.ref_count--;
-
-   return 0;
+   return ret;
 }
 
+/* TODO: Error returns 0 or -1? */
 extern ssize_t vfs_read(file_desc_t **file, void *buf, size_t nbytes)
 {
-   ssize_t ret;
+   ssize_t ret = 0;
 
-   /* Assert the file object */
-   ASSERT_MSG(NULL != *file, "read(): file object invalid");
-   if(NULL == *file)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Invalid file descriptor */
-      return -1;
-   }
+	   /* Assert the file object */
+	   ASSERT_MSG(NULL != *file, "read(): file object invalid");
+	   if(NULL == *file)
+	   {
+	      /* Invalid file descriptor */
+	      return -1;
+	   }
 
-   /* Verify that the lower layer driver implements the read operation */
-   ASSERT_MSG(NULL != (*file)->node->fs_info->drv->driver_op->file_read, "read(): read op not available");
-   if(NULL == (*file)->node->fs_info->drv->driver_op->file_read)
-   {
-      /* Driver doesnt support read */
-      return 1;
-   }
-   /* Lower layer read operation */
-   ret = (*file)->node->fs_info->drv->driver_op->file_read((*file), buf, nbytes);
-   ASSERT_MSG(ret == nbytes, "read(): file_read() failed");
-   if(ret != nbytes)
-   {
-      //printf("vfs_read(): Expected to read %d, readed %d\n", nbytes, ret);
-      /* TODO: Set ERROR to show that could not read nbytes */
+	   /* Verify that the lower layer driver implements the read operation */
+	   ASSERT_MSG(NULL != (*file)->node->fs_info->drv->driver_op->file_read, "read(): read op not available");
+	   if(NULL == (*file)->node->fs_info->drv->driver_op->file_read)
+	   {
+	      /* Driver doesnt support read */
+	      return 1;
+	   }
+	   /* Lower layer read operation */
+	   ret = (*file)->node->fs_info->drv->driver_op->file_read((*file), buf, nbytes);
+	   ASSERT_MSG(ret == nbytes, "read(): file_read() failed");
+	   if(ret != nbytes)
+	   {
+	      //printf("vfs_read(): Expected to read %d, readed %d\n", nbytes, ret);
+	      /* TODO: Set ERROR to show that could not read nbytes */
+	   }
+
+	   xSemaphoreGive( vfs_mutex );
    }
    return ret;
 }
 
 extern ssize_t vfs_write(file_desc_t **file, void *buf, size_t nbytes)
 {
-   ssize_t ret;
+   ssize_t ret = 0;
 
-   /* Assert the file object */
-   ASSERT_MSG(NULL != *file, "read(): file object invalid");
-   if(NULL == *file)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Invalid file descriptor */
-      return -1;
-   }
+	   /* Assert the file object */
+	   ASSERT_MSG(NULL != *file, "read(): file object invalid");
+	   if(NULL == *file)
+	   {
+	      /* Invalid file descriptor */
+	      return -1;
+	   }
 
-   /* Verify that the lower layer driver implements the write operation */
-   if(NULL == (*file)->node->fs_info->drv->driver_op->file_write)
-   {
-      /* Driver doesnt support write */
-      return 1;
-   }
-   /* Lower layer write operation */
-   ret = (*file)->node->fs_info->drv->driver_op->file_write((*file), buf, nbytes);
-   ASSERT_MSG(ret == nbytes, "write(): file_write() failed");
-   if(ret!=nbytes)
-   {
-      /* TODO: Set ERROR to show that could not write nbytes */
-      return ret;
+	   /* Verify that the lower layer driver implements the write operation */
+	   if(NULL == (*file)->node->fs_info->drv->driver_op->file_write)
+	   {
+	      /* Driver doesnt support write */
+	      return 1;
+	   }
+	   /* Lower layer write operation */
+	   ret = (*file)->node->fs_info->drv->driver_op->file_write((*file), buf, nbytes);
+	   ASSERT_MSG(ret == nbytes, "write(): file_write() failed");
+	   if(ret!=nbytes)
+	   {
+	      /* TODO: Set ERROR to show that could not write nbytes */
+	      return ret;
+	   }
+
+	   xSemaphoreGive( vfs_mutex );
    }
    return ret;
 }
@@ -1109,35 +1180,41 @@ extern ssize_t vfs_write(file_desc_t **file, void *buf, size_t nbytes)
 extern ssize_t vfs_lseek(file_desc_t **file, ssize_t offset, int whence)
 {
    ssize_t pos;
+   int ret = -1;
 
-   /* Assert file object */
-   ASSERT_MSG(NULL != *file, "read(): file_desc_get() failed");
-   if(NULL == *file)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Invalid file descriptor */
-      return -1;
-   }
+	   /* Assert file object */
+	   ASSERT_MSG(NULL != *file, "read(): file_desc_get() failed");
+	   if(NULL == *file)
+	   {
+	      /* Invalid file descriptor */
+	      return -1;
+	   }
 
-   pos=0;
-   switch(whence)
-   {
-      case SEEK_END:
-         pos = (*file)->cursor + offset;
-         break;
-      case SEEK_CUR:
-         pos = (*file)->cursor + offset;
-         break;
-      default:
-         pos = offset;
-         break;
-   }
+	   pos=0;
+	   switch(whence)
+	   {
+	      case SEEK_END:
+		 pos = (*file)->cursor + offset;
+		 break;
+	      case SEEK_CUR:
+		 pos = (*file)->cursor + offset;
+		 break;
+	      default:
+		 pos = offset;
+		 break;
+	   }
 
-   if ((pos >= 0) && (pos <= (*file)->node->f_info.file_size))
-   {
-      (*file)->cursor = (uint32_t) pos;
-   }
+	   if ((pos >= 0) && (pos <= (*file)->node->f_info.file_size))
+	   {
+	      (*file)->cursor = (uint32_t) pos;
+	   }
 
-   return (*file)->cursor;
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
+   }
+   return ret ? -1 : (*file)->cursor;
 }
 
 extern int vfs_unlink(const char *path)
@@ -1145,76 +1222,87 @@ extern int vfs_unlink(const char *path)
    vnode_t *target_inode;
    filesystem_driver_t *driver;
    char *auxpath;
-   int ret;
+   int ret = -1;
 
-   auxpath = (char *) path;
-   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
-   ASSERT_MSG(0 == ret, "unlink(): vfs_inode_search() failed");
-   if(ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* File not found */
-      return -1;
+	   auxpath = (char *) path;
+	   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
+	   ASSERT_MSG(0 == ret, "unlink(): vfs_inode_search() failed");
+	   if(ret)
+	   {
+	      /* File not found */
+	      return -1;
+	   }
+	   ASSERT_MSG(VFS_FTREG == target_inode->f_info.type, "unlink(): not a regular file");
+	   if(VFS_FTREG != target_inode->f_info.type)
+	   {
+	      /* Not a regular file, can not unlink */
+	      return -1;
+	   }
+	   //printf("unlink(): file_name: %.*s refcount: %d\n", target_inode->f_info.file_namlen,
+		             //target_inode->f_info.file_name, target_inode->f_info.ref_count);
+	   ASSERT_MSG(0 == target_inode->f_info.ref_count, "unlink(): Node still in use. Cant unlink");
+	   if(0 != target_inode->f_info.ref_count)
+	   {
+	      /* Node still in use. Dont delete */
+	      return -1;
+	   }
+	   driver = target_inode->fs_info->drv;
+	   ASSERT_MSG(NULL != driver, "unlink(): driver not available");
+	   if(NULL == driver)
+	   {
+	      /*No driver. Fatal error*/
+	      return -1;
+	   }
+	   ASSERT_MSG(NULL != driver->driver_op->fs_delete_node, "unlink(): delete op not available");
+	   if(NULL == driver->driver_op->fs_delete_node)
+	   {
+	      /*The filesystem driver does not support this method*/
+	      return -1;
+	   }
+	   ret = driver->driver_op->fs_delete_node(target_inode->parent_node, target_inode);
+	   ASSERT_MSG(0 == ret, "unlink(): lower layer unlink failed");
+	   if(ret)
+	   {
+	      /* Filesystem op failed */
+	      return -1;
+	   }
+	   /* TODO: Remove node from vfs */
+	   ret = vfs_delete_child(target_inode);
+	   ASSERT_MSG(0 == ret, "unlink(): vfs_delete_child() failed");
+	   if(ret)
+	   {
+	      /* Filesystem op failed */
+	      return -1;
+	   }
+
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
    }
-   ASSERT_MSG(VFS_FTREG == target_inode->f_info.type, "unlink(): not a regular file");
-   if(VFS_FTREG != target_inode->f_info.type)
-   {
-      /* Not a regular file, can not unlink */
-      return -1;
-   }
-   //printf("unlink(): file_name: %.*s refcount: %d\n", target_inode->f_info.file_namlen,
-                     //target_inode->f_info.file_name, target_inode->f_info.ref_count);
-   ASSERT_MSG(0 == target_inode->f_info.ref_count, "unlink(): Node still in use. Cant unlink");
-   if(0 != target_inode->f_info.ref_count)
-   {
-      /* Node still in use. Dont delete */
-      return -1;
-   }
-   driver = target_inode->fs_info->drv;
-   ASSERT_MSG(NULL != driver, "unlink(): driver not available");
-   if(NULL == driver)
-   {
-      /*No driver. Fatal error*/
-      return -1;
-   }
-   ASSERT_MSG(NULL != driver->driver_op->fs_delete_node, "unlink(): delete op not available");
-   if(NULL == driver->driver_op->fs_delete_node)
-   {
-      /*The filesystem driver does not support this method*/
-      return -1;
-   }
-   ret = driver->driver_op->fs_delete_node(target_inode->parent_node, target_inode);
-   ASSERT_MSG(0 == ret, "unlink(): lower layer unlink failed");
-   if(ret)
-   {
-      /* Filesystem op failed */
-      return -1;
-   }
-   /* TODO: Remove node from vfs */
-   ret = vfs_delete_child(target_inode);
-   ASSERT_MSG(0 == ret, "unlink(): vfs_delete_child() failed");
-   if(ret)
-   {
-      /* Filesystem op failed */
-      return -1;
-   }
-   return 0;
+   return ret;
 }
 
 extern int filesystem_create(filesystem_info_t **fs, Device *dev, filesystem_driver_t *drv)
 {
    int ret = -1;
 
-   if(NULL != ((*fs) = (filesystem_info_t *) tlsf_malloc(fs_mem_handle, sizeof(filesystem_info_t))))
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      (*fs)->drv = drv;
-      (*fs)->device = *dev;
-      (*fs)->down_layer_info = NULL;
-      (*fs)->ref_count = 0;
-      ret = 0;
-   }
-   else
-   {
+	   if(NULL != ((*fs) = (filesystem_info_t *) tlsf_malloc(fs_mem_handle, sizeof(filesystem_info_t))))
+	   {
+	      (*fs)->drv = drv;
+	      (*fs)->device = *dev;
+	      (*fs)->down_layer_info = NULL;
+	      (*fs)->ref_count = 0;
+	      ret = 0;
+	   }
+	   else
+	   {
 
+	   }
+
+	   xSemaphoreGive( vfs_mutex );
    }
    return ret;
 }
@@ -1225,28 +1313,32 @@ extern int vfs_opendir(vfs_DIR_t *dp, const char *path)
    char *auxpath;
    int ret = -1;
 
-   auxpath = (char *) path;
-
-   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
-   if (ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Directory does not exist. Error */
-   }
-   else
-   {
-      /* Directory exists. Got node.*/
-      if(VFS_FTDIR == target_inode->f_info.type)
-      {
-         if(NULL != dp)
-         {
-            dp->dirnode = target_inode;
-            dp->current_entry = dp->dirnode->child_node;
-            target_inode->f_info.ref_count++;
-         }
-         ret = 0;
-      }
-   }
+	   auxpath = (char *) path;
 
+	   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
+	   if (ret)
+	   {
+	      /* Directory does not exist. Error */
+	   }
+	   else
+	   {
+	      /* Directory exists. Got node.*/
+	      if(VFS_FTDIR == target_inode->f_info.type)
+	      {
+		 if(NULL != dp)
+		 {
+		    dp->dirnode = target_inode;
+		    dp->current_entry = dp->dirnode->child_node;
+		    target_inode->f_info.ref_count++;
+		 }
+		 ret = 0;
+	      }
+	   }
+
+	   xSemaphoreGive( vfs_mutex );
+   }
    return ret;
 }
 
@@ -1254,11 +1346,15 @@ extern int vfs_closedir(vfs_DIR_t *dp)
 {
    int ret = -1;
 
-   dp->dirnode->f_info.ref_count--;
-   dp->dirnode = NULL;
-   dp->current_entry = NULL;
-   ret = 0;
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
+   {
+	   dp->dirnode->f_info.ref_count--;
+	   dp->dirnode = NULL;
+	   dp->current_entry = NULL;
+	   ret = 0;
 
+	   xSemaphoreGive( vfs_mutex );
+   }
    return ret;
 }
 
@@ -1267,26 +1363,30 @@ extern int vfs_readdir(vfs_DIR_t *dp, vfs_FILINFO_t *fno)
 {
    int ret = -1;
 
-   if(NULL != dp->current_entry)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      memcpy(fno->file_name, dp->current_entry->f_info.file_name, dp->current_entry->f_info.file_namlen);
-      fno->file_namlen = dp->current_entry->f_info.file_namlen;
-      fno->file_name[fno->file_namlen] = 0;
-      fno->file_size = dp->current_entry->f_info.file_size;
-      fno->type = dp->current_entry->f_info.type;
+	   if(NULL != dp->current_entry)
+	   {
+	      memcpy(fno->file_name, dp->current_entry->f_info.file_name, dp->current_entry->f_info.file_namlen);
+	      fno->file_namlen = dp->current_entry->f_info.file_namlen;
+	      fno->file_name[fno->file_namlen] = 0;
+	      fno->file_size = dp->current_entry->f_info.file_size;
+	      fno->type = dp->current_entry->f_info.type;
 
-      dp->current_entry = dp->current_entry->sibling_node;
-      ret = 0;
-   }
-   else
-   {
-      fno->file_name[0] = '\0';
-      fno->file_namlen = 0;
-      fno->file_size = 0;
-      fno->type = VFS_FTUNKNOWN;
-      ret = 0;
-   }
+	      dp->current_entry = dp->current_entry->sibling_node;
+	      ret = 0;
+	   }
+	   else
+	   {
+	      fno->file_name[0] = '\0';
+	      fno->file_namlen = 0;
+	      fno->file_size = 0;
+	      fno->type = VFS_FTUNKNOWN;
+	      ret = 0;
+	   }
 
+	   xSemaphoreGive( vfs_mutex );
+   }
    return ret;
 }
 
@@ -1296,21 +1396,26 @@ extern int vfs_stat(const char *path, vfs_FILINFO_t *fno)
    char *auxpath;
    int ret = -1;
 
-   auxpath = (char *) path;
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
+   {
+	   auxpath = (char *) path;
 
-   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
-   if (ret)
-   {
-      /* File does not exist. Error */
-   }
-   else
-   {
-      /* File exists. Got node.*/
-      memcpy(fno->file_name, target_inode->f_info.file_name, target_inode->f_info.file_namlen);
-      fno->file_namlen = target_inode->f_info.file_namlen;
-      fno->file_size = target_inode->f_info.file_size;
-      fno->type = target_inode->f_info.type;
-      ret = 0;
+	   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
+	   if (ret)
+	   {
+	      /* File does not exist. Error */
+	   }
+	   else
+	   {
+	      /* File exists. Got node.*/
+	      memcpy(fno->file_name, target_inode->f_info.file_name, target_inode->f_info.file_namlen);
+	      fno->file_namlen = target_inode->f_info.file_namlen;
+	      fno->file_size = target_inode->f_info.file_size;
+	      fno->type = target_inode->f_info.type;
+	      ret = 0;
+	   }
+
+	   xSemaphoreGive( vfs_mutex );
    }
 
    return ret;
@@ -1319,17 +1424,23 @@ extern int vfs_stat(const char *path, vfs_FILINFO_t *fno)
 extern size_t vfs_size(const file_desc_t **file)
 {
    vnode_t *node;
+   int ret = -1;
 
-   /* Assert the file descriptor */
-   if(NULL == *file)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Invalid file descriptor */
-      return 0;
+	   /* Assert the file descriptor */
+	   if(NULL == *file)
+	   {
+	      /* Invalid file descriptor */
+	      return 0;
+	   }
+
+	   node = (*file)->node;
+
+	   ret = 0;
+	   xSemaphoreGive( vfs_mutex );
    }
-
-   node = (*file)->node;
-
-   return node->f_info.file_size;
+   return ret ? 0 : node->f_info.file_size;
 }
 
 extern int vfs_finddir(const char *path )
@@ -1338,22 +1449,26 @@ extern int vfs_finddir(const char *path )
    char *auxpath;
    int ret = -1;
 
-   auxpath = (char *) path;
-
-   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
-   if (ret)
+   if( pdTRUE == xSemaphoreTake(vfs_mutex, ( TickType_t ) portMAX_DELAY ) )
    {
-      /* Directory does not exist. Error */
-   }
-   else
-   {
-      /* Directory exists. Got node.*/
-      if(VFS_FTDIR == target_inode->f_info.type)
-      {
-         ret = 0;
-      }
-   }
+	   auxpath = (char *) path;
 
+	   ret = vfs_inode_search(&auxpath, &target_inode);   /* Return 0 if node found */
+	   if (ret)
+	   {
+	      /* Directory does not exist. Error */
+	   }
+	   else
+	   {
+	      /* Directory exists. Got node.*/
+	      if(VFS_FTDIR == target_inode->f_info.type)
+	      {
+		 ret = 0;
+	      }
+	   }
+
+	   xSemaphoreGive( vfs_mutex );
+   }
    return ret;
 }
 
