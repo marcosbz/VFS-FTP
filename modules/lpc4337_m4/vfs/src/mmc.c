@@ -36,8 +36,8 @@
 #define CS_HIGH()   Chip_GPIO_SetPinOutHigh(LPC_GPIO_PORT, 5, 15)
 
 #define	FCLK_SLOW()   Chip_SSP_SetBitRate(LPC_SSP1, 10000);	/* Set slow clock (100k-400k) */
-//#define	FCLK_FAST()   Chip_SSP_SetBitRate(LPC_SSP1, 400000);	/* Set fast clock (depends on the CSD) */
 #define	FCLK_FAST()   Chip_SSP_SetBitRate(LPC_SSP1, 400000);	/* Set fast clock (depends on the CSD) */
+//#define	FCLK_FAST()   Chip_SSP_SetBitRate(LPC_SSP1, 40000);	/* Set fast clock (depends on the CSD) */
 
 
 /*--------------------------------------------------------------------------

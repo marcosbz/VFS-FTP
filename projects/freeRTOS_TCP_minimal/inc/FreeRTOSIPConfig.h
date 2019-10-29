@@ -44,7 +44,7 @@ extern void vLoggingPrintf( const char *pcFormatString, ... );
 /* Set to 1 to print out debug messages.  If ipconfigHAS_DEBUG_PRINTF is set to
 1 then FreeRTOS_debug_printf should be defined to the function used to print
 out the debugging messages. */
-#define ipconfigHAS_DEBUG_PRINTF	1
+#define ipconfigHAS_DEBUG_PRINTF	0
 #if( ipconfigHAS_DEBUG_PRINTF == 1 )
 	#define FreeRTOS_debug_printf(X)	printf X
 #endif
@@ -53,7 +53,7 @@ out the debugging messages. */
 FreeRTOS_netstat() command, and ping replies.  If ipconfigHAS_PRINTF is set to 1
 then FreeRTOS_printf should be set to the function used to print out the
 messages. */
-#define ipconfigHAS_PRINTF			1
+#define ipconfigHAS_PRINTF			0
 #if( ipconfigHAS_PRINTF == 1 )
 	#define FreeRTOS_printf(X)			printf X
 #endif
@@ -74,8 +74,8 @@ used as defaults. */
 //#define ipconfigSOCK_DEFAULT_RECEIVE_BLOCK_TIME	( 5000 )
 //#define	ipconfigSOCK_DEFAULT_SEND_BLOCK_TIME	( 5000 )
 
-#define ipconfigSOCK_DEFAULT_RECEIVE_BLOCK_TIME	( 20000 )
-#define	ipconfigSOCK_DEFAULT_SEND_BLOCK_TIME	( 20000 )
+#define ipconfigSOCK_DEFAULT_RECEIVE_BLOCK_TIME	( 50000 )
+#define	ipconfigSOCK_DEFAULT_SEND_BLOCK_TIME	( 50000 )
 
 /* Include support for LLMNR: Link-local Multicast Name Resolution
 (non-Microsoft) */
@@ -302,9 +302,9 @@ real program memory (RAM or flash) or just has a random non-zero value. */
 
 /* Include support for TCP hang protection.  All sockets in a connecting or
 disconnecting stage will timeout after a period of non-activity. */
-#define ipconfigTCP_HANG_PROTECTION			( 1 )
+#define ipconfigTCP_HANG_PROTECTION			( 0 )
 //#define ipconfigTCP_HANG_PROTECTION_TIME	( 30 )
-#define ipconfigTCP_HANG_PROTECTION_TIME	( 1000 )
+#define ipconfigTCP_HANG_PROTECTION_TIME	( 10000 )
 
 /* Include support for TCP keep-alive messages. */
 #define ipconfigTCP_KEEP_ALIVE				( 1 )

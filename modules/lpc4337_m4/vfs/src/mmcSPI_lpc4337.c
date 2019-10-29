@@ -375,6 +375,7 @@ static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, size_t const
             //printf("mmcSPI_write(): write back succesfull. Next iteration\n");
             bytes_left -= bytes_write;
             i += bytes_write;
+            position += bytes_write;
             sector++;
          }
          else
@@ -385,9 +386,9 @@ static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, size_t const
    }
    if(0 == bytes_left)
    {
-      
+
       ret = i;
-      self->position += i;
+      self->position = position;
    }
    else
    {
