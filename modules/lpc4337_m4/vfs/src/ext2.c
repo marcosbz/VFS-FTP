@@ -1309,7 +1309,7 @@ static int ext2_mount(filesystem_info_t *fs, vnode_t *dest_node)
    ASSERT_MSG(fsinfo->e2sb.s_inodes_per_group>0, "ext2_mount(): s_inodes_per_group zero. Error");
    fsinfo->s_groups_count = (fsinfo->e2sb.s_inodes_count)/(fsinfo->e2sb.s_inodes_per_group);
    fsinfo->s_block_size = 1024 << fsinfo->e2sb.s_log_block_size;
-   fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */
+   fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */ /* FIXME: Sector size not unbedingt 512 */
    fsinfo->s_inodes_per_block = (fsinfo->s_block_size)/(fsinfo->e2sb.s_inode_size);
    /* Size of the block chunks to be read in buffer */
    fsinfo->s_buff_size = (EXT2_BLOCK_BUFFER_SIZE < fsinfo->s_block_size) ? EXT2_BLOCK_BUFFER_SIZE : fsinfo->s_block_size;
@@ -3352,6 +3352,124 @@ static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
 
    return 0;
 }
+
+#if 0
+
+/* BlockDevice interface implementation */
+static ssize_t storageUSB_read(StorageUSB self, uint8_t * const buf, size_t const nbyte)
+{
+   ssize_t ret = -1;
+   size_t bytes_left, bytes_read, i, sector, position, bytes_offset;
+   assert(ooc_isInstanceOf(self, StorageUSB));
+
+   i=0; bytes_left = nbyte; sector = self->position / self->DiskCapacity.BlockSize; position = self->position;
+   while(bytes_left)
+   {
+      bytes_offset = position % self->DiskCapacity.BlockSize;
+      bytes_read = (bytes_left > (self->DiskCapacity.BlockSize - bytes_offset)) ? (self->DiskCapacity.BlockSize - bytes_offset) : bytes_left;
+      if(storageUSB_singleBlockRead(self, self->block_buf, sector) == 0)
+      {
+         memcpy(buf + i, self->block_buf + bytes_offset, bytes_read);
+         bytes_left -= bytes_read;
+         i += bytes_read;
+         position += bytes_read;
+         sector++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == bytes_left)
+   {
+      ret = i;
+      self->position += i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+static ssize_t ext2_device_buf_read(Device dev, uint8_t * const buf, uint32_t block, off_t const offset,
+                                 size_t const nbyte)
+{
+   ssize_t ret = -1;
+   size_t bytes_left, bytes_read, i, sector, position, bytes_offset;
+   BlockDevice bdev = ooc_get_interface((Object) dev, BlockDevice);
+
+   if(!bdev)
+   {
+      return -1;
+   }
+
+   i=0; bytes_left = nbyte; sector = self->position / self->DiskCapacity.BlockSize; position = self->position;
+
+   //fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */ /* FIXME: Sector size not unbedingt 512 */
+   sector = block * fsinfo->sectors_in_block + offset / self->DiskCapacity.BlockSize;
+   while(bytes_left)
+   {
+
+      ret = bdev->read((Object)dev, buf, sector, count);
+      if(ret!=nbyte)
+      {
+         return -1;
+      }
+
+   return 0;
+}
+
+static ssize_t ext2_device_buf_write(Device dev, uint8_t * const buf, off_t const offset,
+                                 size_t const nbyte)
+{
+   ssize_t ret;
+   BlockDevice bdev = ooc_get_interface((Object) dev, BlockDevice);
+
+   if(!bdev)
+   {
+      return -1;
+   }
+
+   ret = bdev->lseek((Object)dev, offset, SEEK_SET);
+   if(ret!=offset)
+   {
+      return -1;
+   }
+   ret = bdev->write((Object)dev, buf, nbyte);
+   if(ret!=nbyte)
+   {
+      return -1;
+   }
+   return 0;
+}
+
+/* Writes to ext2_block_buffer */
+static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
+                                 size_t nbyte)
+{
+   uint32_t write_offset, write_size;
+   ssize_t ret;
+
+   memset(ext2_block_buffer, c, EXT2_BLOCK_BUFFER_SIZE);
+   write_offset = offset;
+   while(nbyte)
+   {
+      write_size = nbyte <= EXT2_BLOCK_BUFFER_SIZE ? nbyte : EXT2_BLOCK_BUFFER_SIZE;
+      ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer, write_offset, write_size);
+      if(ret)
+      {
+         return -1;
+      }
+      nbyte -= write_size;
+      write_offset += write_size;
+   }
+
+   return 0;
+}
+
+#endif
 
 /* For a max partition size of 4GB, there is a maximum of 512 groups */
 /* Is it unnecesary to pass the node as argument? */

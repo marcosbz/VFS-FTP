@@ -368,6 +368,44 @@ static ssize_t storageUSB_read(StorageUSB self, uint8_t * const buf, size_t cons
    return ret;
 }
 
+#if 0
+
+static ssize_t storageUSB_read(StorageUSB self, uint8_t * const buf, uint32_t sector, size_t count)
+{
+   ssize_t ret = -1;
+
+   assert(ooc_isInstanceOf(self, StorageUSB));
+
+   i=0;
+   position = 0; /* Offset in destination buffer */
+   while(count)
+   {
+      if( storageUSB_singleBlockRead(self, self->block_buf, sector + i) == 0 )
+      {
+         memcpy(buf + position, self->block_buf, self->DiskCapacity.BlockSize);
+         count--;
+         position += self->DiskCapacity.BlockSize;
+         i++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == count)
+   {
+      ret = i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+#endif
+
 static ssize_t storageUSB_write(StorageUSB self, uint8_t const * const buf, size_t const nbyte)
 {
    ssize_t ret = -1;
@@ -413,6 +451,88 @@ static ssize_t storageUSB_write(StorageUSB self, uint8_t const * const buf, size
 
    return ret;
 }
+
+#if 0
+static ssize_t storageUSB_write(StorageUSB self, uint8_t const * const buf, size_t const nbyte)
+{
+   ssize_t ret = -1;
+   size_t bytes_left, bytes_write, i, sector, position, bytes_offset;
+   assert(ooc_isInstanceOf(self, StorageUSB));
+
+   i=0; bytes_left = nbyte; sector = self->position / self->DiskCapacity.BlockSize; position = self->position;
+   while(bytes_left)
+   {
+      bytes_offset = position % self->DiskCapacity.BlockSize;
+      bytes_write = bytes_left > (self->DiskCapacity.BlockSize - bytes_offset) ? (self->DiskCapacity.BlockSize - bytes_offset) : bytes_left;
+      //printf("storageUSB_write(): bytes_left: %d bytes_write: %d sector: %d\n",
+      //                  bytes_left, bytes_write, sector);
+      if(storageUSB_singleBlockRead(self, self->block_buf, sector) == 0)
+      {
+         //printf("storageUSB_write(): Block readed, now copy new data\n");
+         memcpy(self->block_buf + bytes_offset, buf + i, bytes_write);
+         //printf("storageUSB_write(): Data copied. Now write back\n");
+         if(storageUSB_singleBlockWrite(self, self->block_buf, sector) == 0)
+         {
+            //printf("storageUSB_write(): write back succesfull. Next iteration\n");
+            bytes_left -= bytes_write;
+            i += bytes_write;
+
+            position += bytes_write;
+            sector++;
+         }
+         else
+         {
+
+         }
+      }
+   }
+   if(0 == bytes_left)
+   {
+
+      ret = i;
+      self->position = position;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+static ssize_t storageUSB_write(StorageUSB self, uint8_t * const buf, uint32_t sector, size_t count)
+{
+   ssize_t ret = -1;
+
+   assert(ooc_isInstanceOf(self, StorageUSB));
+
+   i=0;
+   position = 0; /* Offset in destination buffer */
+   while(count)
+   {
+      if( storageUSB_singleBlockWrite(self, buf + position, sector + i) == 0 )
+      {
+         count--;
+         position += self->DiskCapacity.BlockSize;
+         i++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == count)
+   {
+      ret = i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+#endif
 
 static ssize_t storageUSB_lseek(StorageUSB self, off_t const offset, uint8_t const whence)
 {
