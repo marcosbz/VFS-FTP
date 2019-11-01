@@ -90,7 +90,7 @@ ClassMembers( RAMDisk, Device )
    uint8_t block_buf[512];
 
    /* BlockDevice */
-   uint32_t position;
+   //uint32_t position;
    ramdisk_status_t status;
 
 EndOfClassMembers;

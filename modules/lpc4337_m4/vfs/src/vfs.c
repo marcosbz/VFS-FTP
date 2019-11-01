@@ -213,8 +213,9 @@ static vnode_t *vfs_root_inode = NULL;
  *
  */
 extern filesystem_driver_t ext2_driver;
-extern filesystem_driver_t pseudofs_driver;
-extern filesystem_driver_t blockdev_driver;
+extern filesystem_driver_t fat_driver;
+//extern filesystem_driver_t pseudofs_driver;
+//extern filesystem_driver_t blockdev_driver;
 
 /** \brief Filesystem drivers table
  *
@@ -224,8 +225,10 @@ extern filesystem_driver_t blockdev_driver;
 static filesystem_driver_t *vfs_fsdriver_table[] =
 {
    &ext2_driver,
-   &blockdev_driver,
-   &pseudofs_driver,
+   &fat_driver,
+   //&blockdev_driver,
+   //&pseudofs_driver,
+   NULL,
    NULL,
    NULL
 };

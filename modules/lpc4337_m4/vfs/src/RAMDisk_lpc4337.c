@@ -71,9 +71,11 @@
 
 /*==================[internal functions declaration]=========================*/
 /* BlockDevice interface implementation */
-static ssize_t RAMDisk_read(RAMDisk self, uint8_t * const buf, size_t const nbyte);
-static ssize_t RAMDisk_write(RAMDisk self, uint8_t const * const buf, size_t const nbyte);
-static ssize_t RAMDisk_lseek(RAMDisk self, off_t const offset, uint8_t const whence);
+//static ssize_t RAMDisk_read(RAMDisk self, uint8_t * const buf, size_t const nbyte); //Old version
+//static ssize_t RAMDisk_write(RAMDisk self, uint8_t const * const buf, size_t const nbyte); //Old version
+static ssize_t RAMDisk_read(RAMDisk self, uint8_t * const buf, uint32_t sector, size_t count);
+static ssize_t RAMDisk_write(RAMDisk self, uint8_t const * const buf, uint32_t sector, size_t count);
+//static ssize_t RAMDisk_lseek(RAMDisk self, off_t const offset, uint8_t const whence); //Old version
 static int RAMDisk_ioctl(RAMDisk self, int32_t request, void* param);
 static int RAMDisk_connect(RAMDisk self);
 static int RAMDisk_disconnect(RAMDisk self);
@@ -104,9 +106,11 @@ static void RAMDisk_initialize( Class this )
    /* Init vtable and override/assign virtual functions */
    RAMDiskVtable vtab = & RAMDiskVtableInstance;
 
-   vtab->BlockDevice.read = (ssize_t (*)(Object, uint8_t * const, size_t const))RAMDisk_read;
-   vtab->BlockDevice.write = (ssize_t (*)(Object, uint8_t const * const buf, size_t const))RAMDisk_write;
-   vtab->BlockDevice.lseek = (ssize_t (*)(Object, off_t const, uint8_t const))RAMDisk_lseek;
+   //vtab->BlockDevice.read = (ssize_t (*)(Object, uint8_t * const, size_t const))RAMDisk_read; //Old version
+   //vtab->BlockDevice.write = (ssize_t (*)(Object, uint8_t const * const buf, size_t const))RAMDisk_write; //Old version
+   vtab->BlockDevice.read = (ssize_t (*)(Object, uint8_t * const buf, uint32_t sector, size_t count))RAMDisk_read;
+   vtab->BlockDevice.write = (ssize_t (*)(Object, uint8_t const * const buf, uint32_t sector, size_t count))RAMDisk_write;
+   //vtab->BlockDevice.lseek = (ssize_t (*)(Object, off_t const, uint8_t const))RAMDisk_lseek; //Old version
    vtab->BlockDevice.ioctl = (int (*)(Object, int32_t, void*))RAMDisk_ioctl;
    vtab->BlockDevice.connect = (int (*)(Object))RAMDisk_connect;
    vtab->BlockDevice.disconnect = (int (*)(Object))RAMDisk_disconnect;
@@ -143,7 +147,7 @@ static void RAMDisk_constructor( RAMDisk self, const void *params )
 
    self->data = NULL;
    self->numSectors = 0;
-   self->position = 0;
+   //self->position = 0;
    self->status = RAMDISK_STATUS_UNINIT;
 }
 
@@ -246,6 +250,7 @@ uint32_t RAMDisk_getSize(RAMDisk self)
    return self->numSectors;
 }
 
+#if 0 //Old version
 /* BlockDevice interface implementation */
 static ssize_t RAMDisk_read(RAMDisk self, uint8_t * const buf, size_t const nbyte)
 {
@@ -283,7 +288,45 @@ static ssize_t RAMDisk_read(RAMDisk self, uint8_t * const buf, size_t const nbyt
 
    return ret;
 }
+#endif
 
+static ssize_t RAMDisk_read(RAMDisk self, uint8_t * const buf, uint32_t sector, size_t count)
+{
+   ssize_t ret = -1;
+   uint32_t i, position;
+
+   assert(ooc_isInstanceOf(self, RAMDisk));
+
+   i=0;
+   position = 0; /* Offset in destination buffer */
+   while(count)
+   {
+      if( RAMDisk_singleBlockRead(self, self->block_buf, sector + i) == 0 )
+      {
+         memcpy(buf + position, self->block_buf, RAMDISK_SECTORSIZE);
+         count--;
+         position += RAMDISK_SECTORSIZE;
+         i++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == count)
+   {
+      ret = i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+
+#if 0
 static ssize_t RAMDisk_write(RAMDisk self, uint8_t const * const buf, size_t const nbyte)
 {
    ssize_t ret = -1;
@@ -329,7 +372,44 @@ static ssize_t RAMDisk_write(RAMDisk self, uint8_t const * const buf, size_t con
 
    return ret;
 }
+#endif
 
+static ssize_t RAMDisk_write(RAMDisk self, uint8_t const * const buf, uint32_t sector, size_t count)
+{
+   ssize_t ret = -1;
+   uint32_t i, position;
+
+   assert(ooc_isInstanceOf(self, RAMDisk));
+
+   i=0;
+   position = 0; /* Offset in destination buffer */
+   while(count)
+   {
+      if( RAMDisk_singleBlockWrite(self, buf + position, sector + i) == 0 )
+      {
+         count--;
+         position += RAMDISK_SECTORSIZE;
+         i++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == count)
+   {
+      ret = i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+
+#if 0
 static ssize_t RAMDisk_lseek(RAMDisk self, off_t const offset, uint8_t const whence)
 {
    assert(ooc_isInstanceOf(self, RAMDisk));
@@ -356,6 +436,7 @@ static ssize_t RAMDisk_lseek(RAMDisk self, off_t const offset, uint8_t const whe
 
    return destination;
 }
+#endif
 
 static int RAMDisk_ioctl(RAMDisk self, int32_t request, void* param)
 {

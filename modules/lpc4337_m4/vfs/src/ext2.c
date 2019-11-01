@@ -197,11 +197,12 @@ static int ext2_buf_read_file(vnode_t *dest_node, uint8_t *buf, uint32_t size, u
 
 /** \brief Read superblock data from formatted device
  **
- ** \param[in] device device from which to read the superblock
+ ** \param[in] fs_info pointer to fs from which to read the superblock
  ** \param[in] sb_p pointer to the structure containing the superblock raw data
  ** \return -1 if an error occurs, in other case 0
  **/
-static int ext2_get_superblock(Device dev, ext2_superblock_t * sb_p);
+//static int ext2_get_superblock(Device dev, ext2_superblock_t * sb_p);
+static int ext2_get_superblock(filesystem_info_t *fs_info, ext2_superblock_t * sb_p);
 
 /** \brief Write the on-memory superblock and group descriptors to disk
  **
@@ -467,39 +468,48 @@ static int ext2_umount_subtree_rec(vnode_t *root);
 
 /** \brief Read data from an offset in a block device
  **
- ** read nbyte from the block device device in offset offset from the beginning
+ ** read nbyte from block+offset in device
  **
  ** \param[in]  device  device to be read
  ** \param[in]  buf     buffer to store the read data
+ ** \param[in]  block   the offset begins from this absolute block address
  ** \param[in]  offset  offset from the beginning of the device
  ** \param[in]  nbyte   count of bytes to be read
- ** \return     the count of bytes read
+ ** \return     -1 if failure, else success
  **/
-static ssize_t ext2_device_buf_read(Device dev, uint8_t * const buf, off_t const offset,
+//static ssize_t ext2_device_buf_read(Device dev, uint8_t * const buf, off_t const offset,
+//                                 size_t const nbyte);
+static ssize_t ext2_device_buf_read(filesystem_info_t *fs_info, uint8_t * buf, uint32_t block, off_t const offset,
                                  size_t const nbyte);
 
 /** \brief Writes data to an offset of a block device
  **
- ** Writes nbyte to the file descriptor fildes from the buffer buf
+ ** Writes nbyte to block+offset in device
  **
  ** \param[in]  device  device to be written
  ** \param[in]  buf     buffer with the data to be written
+ ** \param[in]  block   the offset begins from this absolute block address
  ** \param[in]  offset  offset from the beginning of the device
  ** \param[in]  nbyte   count of bytes to be written
- ** \return     the count of bytes written
+ ** \return     -1 if failure, else success
  **/
-static ssize_t ext2_device_buf_write(Device dev, uint8_t * const buf, off_t const offset,
+//static ssize_t ext2_device_buf_write(Device dev, uint8_t * const buf, off_t const offset,
+//                                 size_t const nbyte);
+static ssize_t ext2_device_buf_write(filesystem_info_t *fs_info, uint8_t * const buf, uint32_t block, off_t const offset,
                                  size_t const nbyte);
 
-/** \brief Writes c into each of the first nbyte bytes starting at offset bytes of device
+/** \brief Writes c into each of the first nbyte bytes starting at block+offset bytes of device
  **
  ** \param[in]  device  device to be written
  ** \param[in]  c     buffer with the data to be written
- ** \param[in]  offset  offset from the beginning of the device
+ ** \param[in]  block   the offset begins from this absolute block address
+ ** \param[in]  offset  byte offset from the beginning of the block
  ** \param[in]  nbyte   count of bytes to be written
  ** \return -1 if an error occurs, in other case 0
  **/
-static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
+//static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
+//                                 size_t nbyte);
+static int ext2_device_buf_memset(filesystem_info_t *fs_info, uint8_t c, uint32_t block, off_t const offset,
                                  size_t nbyte);
 
 /*==================[internal data definition]===============================*/
@@ -562,11 +572,13 @@ static void assert_msg(int cond, char* msg, char * file, int line)
    }
 }
 
-int ext2_get_superblock(Device dev, ext2_superblock_t * sb_p)
+//static int ext2_get_superblock(Device dev, ext2_superblock_t * sb_p)
+static int ext2_get_superblock(filesystem_info_t *fs_info, ext2_superblock_t * sb_p)
 {
    int32_t ret;
 
-   ret = ext2_device_buf_read(dev, (uint8_t *)sb_p, EXT2_SBOFF, sizeof(ext2_superblock_t));
+   //ret = ext2_device_buf_read(dev, (uint8_t *)sb_p, EXT2_SBOFF, sizeof(ext2_superblock_t));
+   ret = ext2_device_buf_read(fs_info, (uint8_t *)sb_p, 0, EXT2_SBOFF, sizeof(ext2_superblock_t));
    if(ret)
    {
       return -1;
@@ -677,9 +689,11 @@ static int ext2_read_inode(vnode_t *dest_node, uint32_t inumber)
    {
       return -1;
    }
-   inode_offset = (gd.inode_table)*(fsinfo->s_block_size) +
-                  ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
-   ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_node_buffer, inode_offset, sizeof(ext2_inode_t));
+   //inode_offset = (gd.inode_table)*(fsinfo->s_block_size) +
+   //               ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
+   inode_offset = ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
+   //ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_node_buffer, inode_offset, sizeof(ext2_inode_t));
+   ret = ext2_device_buf_read(dest_node->fs_info, (uint8_t *)&ext2_node_buffer, gd.inode_table, inode_offset, sizeof(ext2_inode_t));
    if(ret)
    {
       return -1;
@@ -700,17 +714,18 @@ static int ext2_read_inode(vnode_t *dest_node, uint32_t inumber)
  */
 static int ext2_search_directory(vnode_t *node, char *name, uint16_t namlen, uint32_t *inumber_p)
 {
-   uint32_t data_block, block_offset, file_pointer;
+   //uint32_t data_block, block_offset, file_pointer;
+   uint32_t data_block, file_pointer;
    uint16_t entry_pointer;
    int ret;
    uint8_t flag_entry_found = 0;
    //ext2_direntry_t ext2_dir_entry_buffer;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -727,13 +742,14 @@ static int ext2_search_directory(vnode_t *node, char *name, uint16_t namlen, uin
          return -1;
       }
       /* block_offset points to the first byte address of the current block */
-      block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
+      //block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
       /* entry pointer iterates sequentially over the entries until it reaches the end of the block */
       for(entry_pointer = 0; entry_pointer < fsinfo->s_block_size;
             entry_pointer += ext2_dir_entry_buffer.rec_len)
       {
          /* Read entry fields, except for the name. 8 bytes in total */
-         ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
          if(ret)
          {
             return -1;
@@ -743,7 +759,9 @@ static int ext2_search_directory(vnode_t *node, char *name, uint16_t namlen, uin
             if(ext2_dir_entry_buffer.name_len == namlen)
             {
                /* Read the name of the entry */
-               ret = ext2_device_buf_read(dev, (uint8_t *)((uint8_t *)&ext2_dir_entry_buffer + 8), block_offset + entry_pointer + 8,
+               //ret = ext2_device_buf_read(dev, (uint8_t *)((uint8_t *)&ext2_dir_entry_buffer + 8), block_offset + entry_pointer + 8,
+               //                           ext2_dir_entry_buffer.name_len);
+               ret = ext2_device_buf_read(node->fs_info, (uint8_t *)((uint8_t *)&ext2_dir_entry_buffer + 8), data_block, entry_pointer + 8,
                                           ext2_dir_entry_buffer.name_len);
                if(ret)
                {
@@ -761,7 +779,7 @@ static int ext2_search_directory(vnode_t *node, char *name, uint16_t namlen, uin
       if(flag_entry_found)
       {
          /* entry_pointer keeps the address of the entry to be deleted
-          * block_offset keeps the address of the block to be modified
+          * data_block keeps the address of the block to be modified
           */
          break;
       }
@@ -872,6 +890,17 @@ static int ext2_init(void *par)
    return 0;
 }
 
+
+/*
+ext2_fs_info_t *fsinfo;
+fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
+fsinfo->sectors_in_block
+fsinfo->sector_size
+fsinfo->sector_size
+
+fsinfo->sectors_in_block = 2;
+fsinfo->sector_size = ;
+*/
 static int ext2_format(filesystem_info_t *fs, void *param)
 {
    int ret;
@@ -879,15 +908,20 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    BlockDevice bdev;
    blockDevInfo_t blockInfo;
    ext2_format_param_t format_parameters;
+   
 
    ext2_superblock_t superblock;
    ext2_gd_t gd_buffer;
    ext2_inode_t node;
 
+   ext2_fs_info_t *fsinfo;
+   ext2_fs_info_t ext2_fsinfo; /* To use as argument for ext2_device_buf_write/ext2_device_buf_read */
+
    uint16_t i, aux,group_index;
    uint16_t ngroups, nblocks_gd, inodes_per_group, inodeblocks_per_group,
             minmetablocks_per_group,  nblocks_last_group, nblocks_group_overhead;
-   uint32_t block_offset, free_blocks_count, free_inodes_count, write_offset;
+   //uint32_t block_offset, free_blocks_count, free_inodes_count, write_offset;
+   uint32_t block_offset, free_blocks_count, free_inodes_count;
    uint32_t group_offset;
    uint8_t   aux_byte;
 
@@ -926,8 +960,6 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       if(format_parameters.partition_size * format_parameters.block_size >= blockInfo.num * blockInfo.size)
          return -1;
    }
-
-   ext2_device_buf_memset(dev, 0xFF, 0, 1024*1024*32); /* FIXME: DEBUG */
 
    /* Initialize default ext2 superblock contents */
    memset((uint8_t *)&superblock, 0, sizeof(ext2_superblock_t));
@@ -970,8 +1002,48 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    superblock.s_uuid[15] = 0;
    strcpy((char *) superblock.s_volume_name, "VFSEXT2");      /* volume name */
 
-   ext2_device_buf_write(dev, (uint8_t *)&superblock, 1024, sizeof(ext2_superblock_t));
-   while(1)
+/*
+Cannot format a mounted fs, so suppose there is no lower layer fsinfo
+
+typedef struct ext2_fs_info
+{
+   ext2_superblock_t e2sb;
+   uint32_t   s_block_size;
+   uint32_t   s_inodes_per_block;
+   uint32_t   s_itb_per_group;
+   uint32_t   s_ginfodb_count;
+   uint32_t   s_desc_per_block;
+   uint32_t   s_groups_count;
+   uint16_t   sector_size;
+   uint8_t    sectors_in_block;
+   uint16_t   s_buff_size;
+   uint8_t    s_buff_per_block;
+} ext2_fs_info_t;
+
+
+ext2_fs_info_t *fsinfo;
+fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
+fsinfo->sectors_in_block
+fsinfo->sector_size
+fsinfo->sector_size
+
+memset((void *)&ext2_fsinfo, 0, sizeof(ext2_fs_info_t));
+fs_info->down_layer_info = (void *)&ext2_fsinfo;
+fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
+fsinfo->sectors_in_block = 2;
+fsinfo->sector_size = blockInfo.size;
+//...
+fs_info->down_layer_info = NULL;
+*/
+   memset((void *)&ext2_fsinfo, 0, sizeof(ext2_fs_info_t));
+   fs->down_layer_info = (void *)&ext2_fsinfo;
+   fsinfo = (ext2_fs_info_t *)fs->down_layer_info;
+   fsinfo->sectors_in_block = 2;
+   fsinfo->sector_size = blockInfo.size;
+
+   //ext2_device_buf_write(dev, (uint8_t *)&superblock, 1024, sizeof(ext2_superblock_t));
+   ext2_device_buf_write(fs, (uint8_t *)&superblock, 0, 1024, sizeof(ext2_superblock_t));
+
    /* Total blocks */
    superblock.s_blocks_count = format_parameters.partition_size;
    /* (block/node) factor = 4 */
@@ -1049,11 +1121,16 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       free_inodes_count += gd_buffer.free_inodes_count;
       gd_buffer.used_dirs_count = (group_index == 0) ? 1 : 0; /* Consider the root dir */
       /* Write data to every group in the partition */
-      for(i=0, group_offset = superblock.s_first_data_block*format_parameters.block_size; i<ngroups;
-            i++, group_offset += superblock.s_blocks_per_group*format_parameters.block_size)
+      //for(i=0, group_offset = superblock.s_first_data_block*format_parameters.block_size; i<ngroups;
+      //      i++, group_offset += superblock.s_blocks_per_group*format_parameters.block_size)
+      for(i=0, group_offset = superblock.s_first_data_block; i<ngroups;
+            i++, group_offset += superblock.s_blocks_per_group)
       {
-         ret = ext2_device_buf_write(dev, (uint8_t *)&gd_buffer,
-                                       group_offset + format_parameters.block_size +
+         //ret = ext2_device_buf_write(dev, (uint8_t *)&gd_buffer,
+         //                              group_offset + format_parameters.block_size +
+         //                              group_index*sizeof(ext2_gd_t), sizeof(ext2_gd_t));
+         ret = ext2_device_buf_write(fs, (uint8_t *)&gd_buffer,
+                                       group_offset + 1,
                                        group_index*sizeof(ext2_gd_t), sizeof(ext2_gd_t));
          ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
          if(ret)
@@ -1067,20 +1144,23 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       {
          nblocks_group_overhead += 1; /* Consider the block containing root dir entries */
       }
-      block_offset = gd_buffer.block_bitmap * format_parameters.block_size;
+      //block_offset = gd_buffer.block_bitmap * format_parameters.block_size;
       /* Must set non existent blocks as reserved
        * Must set metadata blocks as reserved
        */
       /* Set the first bits representing busy blocks */
-      ret = ext2_device_buf_memset(dev, 0xFF, block_offset, nblocks_group_overhead/8);
+      //ret = ext2_device_buf_memset(dev, 0xFF, block_offset, nblocks_group_overhead/8); //FIXME
+      ret = ext2_device_buf_memset(fs, 0xFF, gd_buffer.block_bitmap, 0, nblocks_group_overhead/8); //FIXME
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
       if(ret < 0)
       {
          return -1;
       }
       /* Clear the last bits representing free blocks */
-      ret = ext2_device_buf_memset(dev, 0x00, block_offset + nblocks_group_overhead/8,
-                                    format_parameters.block_size - nblocks_group_overhead/8);
+      //ret = ext2_device_buf_memset(dev, 0x00, block_offset + nblocks_group_overhead/8,
+      //                              format_parameters.block_size - nblocks_group_overhead/8); //FIXME
+      ret = ext2_device_buf_memset(fs, 0x00, gd_buffer.block_bitmap, nblocks_group_overhead/8,
+                                    format_parameters.block_size - nblocks_group_overhead/8); //FIXME
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
       if(ret < 0)
       {
@@ -1094,7 +1174,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       {
          setbit(&aux_byte,i);
       }
-      ret = ext2_device_buf_write(dev, (uint8_t *)&aux_byte, block_offset + nblocks_group_overhead/8, 1);
+      //ret = ext2_device_buf_write(dev, (uint8_t *)&aux_byte, block_offset + nblocks_group_overhead/8, 1);
+      ret = ext2_device_buf_write(fs, (uint8_t *)&aux_byte, gd_buffer.block_bitmap, nblocks_group_overhead/8, 1);
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
       if(ret < 0)
       {
@@ -1109,10 +1190,11 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       /*** INODE BITMAP ***/
 
       /* The root inode is already considered in the reserved inodes */
-      block_offset = gd_buffer.inode_bitmap * format_parameters.block_size;
+      //block_offset = gd_buffer.inode_bitmap * format_parameters.block_size;
       /* Inodes are all free at the beginning. Alloc special nodes later */
       /* Clear the first bits corresponding to free inodes */
-      ret = ext2_device_buf_memset(dev, 0x00, block_offset, superblock.s_inodes_per_group/8);
+      //ret = ext2_device_buf_memset(dev, 0x00, block_offset, superblock.s_inodes_per_group/8); //FIXME
+      ret = ext2_device_buf_memset(fs, 0x00, gd_buffer.inode_bitmap, 0, superblock.s_inodes_per_group/8);
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
       if(ret < 0)
       {
@@ -1122,7 +1204,9 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       //printf("ext2_format(): INODE BITMAP: Set bits offset: %d quant: %d\n",
                         //block_offset + superblock.s_inodes_per_group/8,
                         //format_parameters.block_size - superblock.s_inodes_per_group/8);
-      ret = ext2_device_buf_memset(dev, 0xFF, block_offset + superblock.s_inodes_per_group/8,
+      //ret = ext2_device_buf_memset(dev, 0xFF, block_offset + superblock.s_inodes_per_group/8,
+      //                              format_parameters.block_size - superblock.s_inodes_per_group/8); //FIXME
+      ret = ext2_device_buf_memset(fs, 0xFF, gd_buffer.inode_bitmap, superblock.s_inodes_per_group/8,
                                     format_parameters.block_size - superblock.s_inodes_per_group/8);
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
       if(ret < 0)
@@ -1137,7 +1221,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       {
          clrbit(&aux_byte,i);
       }
-      ret = ext2_device_buf_write(dev, (uint8_t *)&aux_byte, block_offset + superblock.s_inodes_per_group/8, 1);
+      //ret = ext2_device_buf_write(dev, (uint8_t *)&aux_byte, block_offset + superblock.s_inodes_per_group/8, 1);
+      ret = ext2_device_buf_write(fs, (uint8_t *)&aux_byte, gd_buffer.inode_bitmap, superblock.s_inodes_per_group/8, 1);
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
       if(ret)
       {
@@ -1146,7 +1231,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       if (group_index == 0)
       {
          /* mark reserved inodes in first group */
-         ret = ext2_device_buf_memset(dev, 0xFF, block_offset, EXT2_RESERVED_INODES/8);
+         //ret = ext2_device_buf_memset(dev, 0xFF, block_offset, EXT2_RESERVED_INODES/8); //FIXME
+         ret = ext2_device_buf_memset(fs, 0xFF, gd_buffer.inode_bitmap, 0, EXT2_RESERVED_INODES/8);
          ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
          if(ret)
          {
@@ -1160,7 +1246,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
          {
             setbit(&aux_byte,i);
          }
-         ret = ext2_device_buf_write(dev, (uint8_t *)&aux_byte, block_offset + EXT2_RESERVED_INODES/8, 1);
+         //ret = ext2_device_buf_write(dev, (uint8_t *)&aux_byte, block_offset + EXT2_RESERVED_INODES/8, 1);
+         ret = ext2_device_buf_write(fs, (uint8_t *)&aux_byte, gd_buffer.inode_bitmap, EXT2_RESERVED_INODES/8, 1);
          ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
          if(ret)
          {
@@ -1180,9 +1267,9 @@ static int ext2_format(filesystem_info_t *fs, void *param)
        */
       /* If the block size is 2048, block 0 contains boot block and superblock.
        */
-      write_offset = (group_index == 0) ? EXT2_SBOFF : group_offset;
+      //write_offset = (group_index == 0) ? EXT2_SBOFF : group_offset;
       /* Clear all superblock bytes */
-      //ret = ext2_device_buf_memset(dev, 0, write_offset, EXT2_SBSIZE);
+      //ret = ext2_device_buf_memset(dev, 0, write_offset, EXT2_SBSIZE); //FIXME
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
       if(ret)
       {
@@ -1191,7 +1278,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       superblock.s_block_group_nr = group_index;
       /* Copy superblock to disk */
       //ret = ext2_device_buf_write(dev, (uint8_t *)&superblock, write_offset, sizeof(ext2_superblock_t));
-            ret = ext2_device_buf_write(dev, (uint8_t *)&superblock, 1024, sizeof(ext2_superblock_t));
+      //ret = ext2_device_buf_write(dev, (uint8_t *)&superblock, 1024, sizeof(ext2_superblock_t));
+      ret = ext2_device_buf_write(fs, (uint8_t *)&superblock, 0, 1024, sizeof(ext2_superblock_t));
       ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
       if(ret)
       {
@@ -1200,7 +1288,9 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    }
 
    /* Read first group descriptor */
-   ret = ext2_device_buf_read(dev, (uint8_t *)&gd_buffer, (superblock.s_first_data_block + 1)*format_parameters.block_size,
+   //ret = ext2_device_buf_read(dev, (uint8_t *)&gd_buffer, (superblock.s_first_data_block + 1)*format_parameters.block_size,
+   //                            sizeof(ext2_gd_t)); //from format
+   ret = ext2_device_buf_read(fs, (uint8_t *)&gd_buffer, superblock.s_first_data_block + 1, 0,
                                sizeof(ext2_gd_t));
    ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_read() failed");
    if(ret)
@@ -1208,7 +1298,9 @@ static int ext2_format(filesystem_info_t *fs, void *param)
       return -1;
    }
    /* Clean all reserved inodes */
-   ret = ext2_device_buf_memset(dev, 0, gd_buffer.inode_table * format_parameters.block_size,
+   //ret = ext2_device_buf_memset(dev, 0, gd_buffer.inode_table * format_parameters.block_size,
+   //                              superblock.s_inode_size*EXT2_RESERVED_INODES); //FIXME
+   ret = ext2_device_buf_memset(fs, 0, gd_buffer.inode_table, 0,
                                  superblock.s_inode_size*EXT2_RESERVED_INODES);
    ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_memset() failed");
    if(ret)
@@ -1231,7 +1323,9 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    node.i_block[0] = nblocks_group_overhead;
 
    /* Fill root inode */
-   ret = ext2_device_buf_write(dev, (uint8_t *)&node, gd_buffer.inode_table * format_parameters.block_size +
+   //ret = ext2_device_buf_write(dev, (uint8_t *)&node, gd_buffer.inode_table * format_parameters.block_size +
+   //                            superblock.s_inode_size, sizeof(ext2_inode_t)); /* Second inode in table. ROOT INODE */
+   ret = ext2_device_buf_write(fs, (uint8_t *)&node, gd_buffer.inode_table,
                                superblock.s_inode_size, sizeof(ext2_inode_t)); /* Second inode in table. ROOT INODE */
    ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
    if(ret)
@@ -1248,7 +1342,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    ext2_dir_entry_buffer.file_type = 2;
    strcpy(ext2_dir_entry_buffer.name, ".");
 
-   ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, node.i_block[0]*format_parameters.block_size, sizeof(ext2_direntry_t)); /* First entry, "." */
+   //ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, node.i_block[0]*format_parameters.block_size, sizeof(ext2_direntry_t)); /* First entry, "." */
+   ret = ext2_device_buf_write(fs, (uint8_t *)&ext2_dir_entry_buffer, node.i_block[0], 0, sizeof(ext2_direntry_t)); /* First entry, "." */
    ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
    if(ret)
    {
@@ -1262,7 +1357,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
    ext2_dir_entry_buffer.file_type = 2;
    strcpy(ext2_dir_entry_buffer.name, "..");
 
-   ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, node.i_block[0]*format_parameters.block_size+12, sizeof(ext2_direntry_t)); /* Second entry, ".." */
+   //ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, node.i_block[0]*format_parameters.block_size+12, sizeof(ext2_direntry_t)); /* Second entry, ".." */
+   ret = ext2_device_buf_write(fs, (uint8_t *)&ext2_dir_entry_buffer, node.i_block[0], 12, sizeof(ext2_direntry_t)); /* Second entry, ".." */
    ASSERT_MSG(ret >= 0, "ext2_format(): ext2_device_buf_write() failed");
    if(ret)
    {
@@ -1277,7 +1373,8 @@ static int ext2_format(filesystem_info_t *fs, void *param)
 static int ext2_mount(filesystem_info_t *fs, vnode_t *dest_node)
 {
    int ret;
-   Device dev;
+   Device dev; BlockDevice bdev;
+   blockDevInfo_t blockInfo;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
@@ -1299,17 +1396,33 @@ static int ext2_mount(filesystem_info_t *fs, vnode_t *dest_node)
    }
    /* Load file system information to memory */
    dev = dest_node->fs_info->device;
-   ret = ext2_get_superblock(dev, &(fsinfo->e2sb));
+   //ret = ext2_get_superblock(dev, &(fsinfo->e2sb));
+   ret = ext2_get_superblock(dest_node->fs_info, &(fsinfo->e2sb));
    ASSERT_MSG(ret>=0, "ext2_mount(): Could not get superblock");
    if(ret)
    {
       return -1;
    }
+
+   bdev = ooc_get_interface((Object) dev, BlockDevice);
+   if(!bdev)
+   {
+      return -1;
+   }
+
+   ret = bdev->ioctl((Object)dev, IOCTL_BLOCK_GETINFO, (void *)&blockInfo);
+   if(ret != 1)
+   {
+      return -1;
+   }
+
    /* Calculate the number of group descriptors from the superblock info */
    ASSERT_MSG(fsinfo->e2sb.s_inodes_per_group>0, "ext2_mount(): s_inodes_per_group zero. Error");
    fsinfo->s_groups_count = (fsinfo->e2sb.s_inodes_count)/(fsinfo->e2sb.s_inodes_per_group);
    fsinfo->s_block_size = 1024 << fsinfo->e2sb.s_log_block_size;
-   fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */ /* FIXME: Sector size not unbedingt 512 */
+   fsinfo->sector_size = blockInfo.size;
+   //fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */ /* FIXME: Sector size not unbedingt 512 */
+   fsinfo->sectors_in_block = fsinfo->s_block_size / fsinfo->sector_size;
    fsinfo->s_inodes_per_block = (fsinfo->s_block_size)/(fsinfo->e2sb.s_inode_size);
    /* Size of the block chunks to be read in buffer */
    fsinfo->s_buff_size = (EXT2_BLOCK_BUFFER_SIZE < fsinfo->s_block_size) ? EXT2_BLOCK_BUFFER_SIZE : fsinfo->s_block_size;
@@ -1458,13 +1571,13 @@ static size_t ext2_file_write(file_desc_t *desc, void *buf, size_t size)
    int ret;
 
    vnode_t *node;
-   Device dev;
+   //Device dev;
    ext2_inode_t *pinode;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
    node = desc->node;
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -1494,8 +1607,10 @@ static size_t ext2_file_write(file_desc_t *desc, void *buf, size_t size)
          return 0;
       }
       /* write to current block */
-      ret = ext2_device_buf_write(dev, (uint8_t *)buf + buf_pos,
-                                  (device_block<<(10+fsinfo->e2sb.s_log_block_size))+write_offset, write_size);
+      //ret = ext2_device_buf_write(dev, (uint8_t *)buf + buf_pos,
+      //                            (device_block<<(10+fsinfo->e2sb.s_log_block_size))+write_offset, write_size);
+      ret = ext2_device_buf_write(node->fs_info, (uint8_t *)buf + buf_pos,
+                                  device_block, write_offset, write_size);
       if(ret)
       {
          return -1;
@@ -1544,16 +1659,17 @@ static int ext2_buf_read_file(vnode_t * dest_node, uint8_t *buf, uint32_t size, 
    /* FIXME: If size>finfo->f_size error or truncate? */
    int ret;
    uint32_t file_block, block_offset;
-   uint32_t device_block, device_offset;
+   //uint32_t device_block, device_offset;
+   uint32_t device_block;
    uint16_t block_size, block_shift, block_mask;
    uint32_t total_remainder_size, block_remainder, read_size, buf_pos;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
-   Device dev;
+   //Device dev;
 
    fsinfo = dest_node->fs_info->down_layer_info;
    finfo = dest_node->f_info.down_layer_info;
-   dev = dest_node->fs_info->device;
+   //dev = dest_node->fs_info->device;
 
    block_size = fsinfo->s_block_size;
    block_shift = (uint16_t)fsinfo->e2sb.s_log_block_size + 10;
@@ -1597,7 +1713,7 @@ static int ext2_buf_read_file(vnode_t * dest_node, uint8_t *buf, uint32_t size, 
             *total_read_size_p = buf_pos;
          return ret;
       }
-      device_offset = (device_block << block_shift) + block_offset;
+      //device_offset = (device_block << block_shift) + block_offset;
 
       block_remainder = block_size - block_offset;
       if(total_remainder_size > block_remainder)
@@ -1605,7 +1721,8 @@ static int ext2_buf_read_file(vnode_t * dest_node, uint8_t *buf, uint32_t size, 
       else
          read_size = total_remainder_size;
 
-      ret = ext2_device_buf_read(dev, (uint8_t *)(buf+buf_pos), device_offset, read_size);
+      //ret = ext2_device_buf_read(dev, (uint8_t *)(buf+buf_pos), device_offset, read_size);
+      ret = ext2_device_buf_read(dest_node->fs_info, (uint8_t *)(buf+buf_pos), device_block, block_offset, read_size);
       ASSERT_MSG(0 == ret, "ext2_buf_read_file(): ext2_device_buf_read() failed");
       if(ret)
       {
@@ -1731,15 +1848,16 @@ static int ext2_buf_read_file(vnode_t * dest_node, uint8_t *buf, uint32_t size, 
 static int ext2_block_map(vnode_t * node, uint32_t file_block, uint32_t *device_block_p)
 {
    int ret;
-   uint32_t block_pos, temp_block_num, index_offset, block_offset;
+   //uint32_t block_pos, temp_block_num, index_offset, block_offset;
+   uint32_t block_pos, temp_block_num, index_offset;
    uint8_t shift_block_level, shift_single_block_level, block_level;
    ext2_inode_t *pinode;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -1795,11 +1913,14 @@ static int ext2_block_map(vnode_t * node, uint32_t file_block, uint32_t *device_
          /* 1: temp_block_num is the block indicated in the inode (0-256)*/
          /* 2: temp_block_num is the block indicated in the entry in the first level entry block (256-256*256) */
          /* 3: temp_block_num is the block indicated in the entry in the second level entry block (256*256-256*256*256) */
-         index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
-                          (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+         //index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
+         //                 (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+         //                 >> shift_block_level) * sizeof(uint32_t);
+         index_offset =   (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
                           >> shift_block_level) * sizeof(uint32_t);
          /* Read next indirection levels block. First block entry not in inode */
-         ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&temp_block_num, temp_block_num, index_offset, sizeof(uint32_t));
          if(ret)
          {
             return -1;
@@ -1840,15 +1961,16 @@ static int ext2_mount_load_rec(vnode_t *dir_node)
 {
    vnode_t *child_node;
    ext2_direntry_t ext2_dir_entry_buffer;
-   uint32_t data_block, block_offset, file_pointer;
+   //uint32_t data_block, block_offset, file_pointer;
+   uint32_t data_block, file_pointer;
    uint16_t entry_pointer;
    int ret, mode;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = dir_node->fs_info->device;
+   //dev = dir_node->fs_info->device;
    finfo = (ext2_file_info_t *)dir_node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)dir_node->fs_info->down_layer_info;
 
@@ -1864,14 +1986,15 @@ static int ext2_mount_load_rec(vnode_t *dir_node)
          return -1;
       }
       /* block_offset points to the first byte address of the current block */
-      block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
+      //block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
       /* entry pointer iterates sequentially over the entries until it reaches the end of the block */
       for(entry_pointer = 0; entry_pointer < fsinfo->s_block_size;
             entry_pointer += ext2_dir_entry_buffer.rec_len)
       {
          /* Read entry fields, except for the name. 8 bytes in total */
 
-         ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         ret = ext2_device_buf_read(dir_node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
          ASSERT_MSG(0 == ret, "ext2_mount_load_rec(): ext2_device_buf_read() failed");
          if(ret)
          {
@@ -1891,7 +2014,9 @@ static int ext2_mount_load_rec(vnode_t *dir_node)
             continue; /* Directory corrupt */
          }
          /* Read the name of the entry */
-         ret = ext2_device_buf_read(dev, (uint8_t *)ext2_dir_entry_buffer.name, block_offset + entry_pointer + 8,
+         //ret = ext2_device_buf_read(dev, (uint8_t *)ext2_dir_entry_buffer.name, block_offset + entry_pointer + 8,
+         //                           ext2_dir_entry_buffer.name_len);
+         ret = ext2_device_buf_read(dir_node->fs_info, (uint8_t *)ext2_dir_entry_buffer.name, data_block, entry_pointer + 8,
                                     ext2_dir_entry_buffer.name_len);
          ASSERT_MSG(0 == ret, "ext2_mount_load_rec(): ext2_device_buf_read() failed");
          if(ret)
@@ -2119,11 +2244,11 @@ static int ext2_delete_indirect_entries(vnode_t * node)
    uint32_t i, j;
    ext2_inode_t *pinode;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -2151,11 +2276,13 @@ static int ext2_delete_indirect_entries(vnode_t * node)
 
    if( !err && pinode->i_block[N_DIRECT_BLOCKS + 1] )
    {
-      l1_entry_offset = (pinode->i_block[N_DIRECT_BLOCKS + 1]) << (10+fsinfo->e2sb.s_log_block_size);
+      //l1_entry_offset = (pinode->i_block[N_DIRECT_BLOCKS + 1]) << (10+fsinfo->e2sb.s_log_block_size);
+      l1_entry_offset = 0;
       err = 0;
       for(i = 0; i < n_entries_per_block; i++)
       {
-         if( !ext2_device_buf_read(dev, (uint8_t *)&l1_entry, l1_entry_offset, sizeof(uint32_t)) )
+         //if( !ext2_device_buf_read(dev, (uint8_t *)&l1_entry, l1_entry_offset, sizeof(uint32_t)) )
+         if( !ext2_device_buf_read(node->fs_info, (uint8_t *)&l1_entry, pinode->i_block[N_DIRECT_BLOCKS + 1], l1_entry_offset, sizeof(uint32_t)) )
          {
             if( 0 == l1_entry )
             {
@@ -2195,20 +2322,24 @@ static int ext2_delete_indirect_entries(vnode_t * node)
 
    if( !err && pinode->i_block[N_DIRECT_BLOCKS + 2] )
    {
-      l1_entry_offset = (pinode->i_block[N_DIRECT_BLOCKS + 2]) << (10+fsinfo->e2sb.s_log_block_size);
+      //l1_entry_offset = (pinode->i_block[N_DIRECT_BLOCKS + 2]) << (10+fsinfo->e2sb.s_log_block_size);
+      l1_entry_offset = 0;
       err = 0;
       for(i = 0; i < n_entries_per_block; i++)
       {
-         if( !ext2_device_buf_read(dev, (uint8_t *)&l1_entry, l1_entry_offset, sizeof(uint32_t)) )
+         //if( !ext2_device_buf_read(dev, (uint8_t *)&l1_entry, l1_entry_offset, sizeof(uint32_t)) )
+         if( !ext2_device_buf_read(node->fs_info, (uint8_t *)&l1_entry, pinode->i_block[N_DIRECT_BLOCKS + 2], l1_entry_offset, sizeof(uint32_t)) )
          {
             if( 0 == l1_entry )
             {
                break;
             }
-            l2_entry_offset = l1_entry << (10+fsinfo->e2sb.s_log_block_size);
+            //l2_entry_offset = l1_entry << (10+fsinfo->e2sb.s_log_block_size);
+            l2_entry_offset = 0;
             for(j = 0; j < n_entries_per_block; j++)
             {
-               if( !ext2_device_buf_read(dev, (uint8_t *)&l2_entry, l2_entry_offset, sizeof(uint32_t)) )
+               //if( !ext2_device_buf_read(dev, (uint8_t *)&l2_entry, l2_entry_offset, sizeof(uint32_t)) )
+               if( !ext2_device_buf_read(node->fs_info, (uint8_t *)&l2_entry, l1_entry, l2_entry_offset, sizeof(uint32_t)) )
                {
                   if( 0 == l2_entry )
                   {
@@ -2478,14 +2609,15 @@ static int ext2_alloc_inode_bit(vnode_t *node, uint32_t *new_inumber_p)
    /* TODO: Slow allocation algorithm. Should optimize */
    ext2_gd_t gd;
    int ret;
-   uint32_t i,j,n, block_offset;
+   //uint32_t i,j,n, block_offset;
+   uint32_t i,j,n;
    uint16_t group_index, segment_index, segment_offset;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -2510,13 +2642,16 @@ static int ext2_alloc_inode_bit(vnode_t *node, uint32_t *new_inumber_p)
       /* All gd indicate that the group is full. No inode available */
       return -1;
    }
-   block_offset = (gd.inode_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
+   //block_offset = (gd.inode_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
    for(segment_index=0, segment_offset = 0; segment_index < fsinfo->s_buff_per_block;
          segment_index++, segment_offset += fsinfo->s_buff_size)
    {
       /* Read node bitmap to bitmap_buffer */
-      ret = ext2_device_buf_read(dev, (uint8_t *)ext2_block_buffer,
-                                 block_offset + segment_offset,
+      //ret = ext2_device_buf_read(dev, (uint8_t *)ext2_block_buffer,
+      //                           block_offset + segment_offset,
+      //                           fsinfo->s_buff_size);
+      ret = ext2_device_buf_read(node->fs_info, (uint8_t *)ext2_block_buffer,
+                                 gd.inode_bitmap, segment_offset,
                                  fsinfo->s_buff_size);
       if(ret)
       {
@@ -2544,8 +2679,11 @@ static int ext2_alloc_inode_bit(vnode_t *node, uint32_t *new_inumber_p)
        */
       return -1;
    }
-   ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
-                              block_offset + segment_offset,
+   //ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
+   //                           block_offset + segment_offset,
+   //                           fsinfo->s_buff_size);
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)ext2_block_buffer,
+                              gd.inode_bitmap, segment_offset,
                               fsinfo->s_buff_size);
    /* Found byte with free bit in block located in block_offset, offset (segment_offset + i) */
    /* Find free bit inside the found byte */
@@ -2568,8 +2706,11 @@ static int ext2_alloc_inode_bit(vnode_t *node, uint32_t *new_inumber_p)
     */
    *new_inumber_p = group_index * fsinfo->e2sb.s_inodes_per_group + (segment_offset<<3) + n + 1;
    /* Write modified bitmap to disk */
-   ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
-                              block_offset + segment_offset,
+   //ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
+   //                           block_offset + segment_offset,
+   //                           fsinfo->s_buff_size);
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)ext2_block_buffer,
+                              gd.inode_bitmap, segment_offset,
                               fsinfo->s_buff_size);
    ASSERT_MSG(ret >= 0, "ext2_alloc_inode_bit(): ext2_device_buf_write() failed");
    if(ret)
@@ -2596,15 +2737,16 @@ static int ext2_dealloc_inode_bit(vnode_t *node)
 {
    ext2_gd_t gd;
    int ret;
-   uint32_t bitmap_offset, n;
+   //uint32_t bitmap_offset, n;
+   uint32_t n;
    uint16_t inode_group;
    uint8_t bitmap_byte;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -2619,8 +2761,9 @@ static int ext2_dealloc_inode_bit(vnode_t *node)
    /* n>>3 (n/8) is then the byte offset in the bitmap where the bit of current node resides */
    n = finfo->f_inumber - (inode_group * fsinfo->e2sb.s_inodes_per_group) - 1;
    /* Read bitmap to bitmap_buffer */
-   bitmap_offset = (gd.inode_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
-   ret = ext2_device_buf_read(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (n>>3), sizeof(uint8_t));
+   //bitmap_offset = (gd.inode_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
+   //ret = ext2_device_buf_read(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (n>>3), sizeof(uint8_t));
+   ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&bitmap_byte, gd.inode_bitmap, n>>3, sizeof(uint8_t));
    if(ret)
    {
       return -1;
@@ -2628,8 +2771,10 @@ static int ext2_dealloc_inode_bit(vnode_t *node)
    /* Clear bit from target byte */
    bitmap_byte &= (uint8_t)~(1<<(n&0x07));
    /* Write modified bitmap byte to disk */
-   ret = ext2_device_buf_write(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (n>>3), sizeof(uint8_t));
+   //ret = ext2_device_buf_write(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (n>>3), sizeof(uint8_t));
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&bitmap_byte, gd.inode_bitmap, n>>3, sizeof(uint8_t));
    if(ret)
+
    {
       return -1;
    }
@@ -2653,15 +2798,16 @@ static int ext2_dealloc_inode_bit(vnode_t *node)
 static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *device_block_p)
 {
    int ret;
-   uint32_t block_pos, new_block, temp_block_num, index_offset, block_offset;
+   //uint32_t block_pos, new_block, temp_block_num, index_offset, block_offset;
+   uint32_t block_pos, new_block, temp_block_num, index_offset;
    uint8_t shift_block_level, shift_single_block_level, block_level, flag_new_block;
    ext2_inode_t *pinode;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -2730,7 +2876,8 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
          {
             return -1;
          }
-         ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+         //ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+         ret = ext2_device_buf_memset(node->fs_info, 0, temp_block_num, 0, fsinfo->s_block_size);
          if(ret)
          {
             return -1;
@@ -2746,11 +2893,14 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
          /* 1: temp_block_num is the block indicated in the inode (0-256)*/
          /* 2: temp_block_num is the block indicated in the entry in the first level entry block (256-256*256) */
          /* 3: temp_block_num is the block indicated in the entry in the second level entry block (256*256-256*256*256) */
-         index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
-                          (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+         //index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
+         //                 (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+         //                 >> shift_block_level) * sizeof(uint32_t);
+         index_offset =   (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
                           >> shift_block_level) * sizeof(uint32_t);
          /* Read next indirection levels block. First block entry not in inode */
-         ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&temp_block_num, temp_block_num, index_offset, sizeof(uint32_t));
          if(ret)
          {
             return -1;
@@ -2763,12 +2913,14 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
             {
                return -1;
             }
-            ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+            //ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+            ret = ext2_device_buf_memset(node->fs_info, 0, temp_block_num, 0, fsinfo->s_block_size);
             if(ret)
             {
                return -1;
             }
-            ret = ext2_device_buf_write(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+            //ret = ext2_device_buf_write(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+            ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&temp_block_num, temp_block_num, index_offset, sizeof(uint32_t));
             if(ret)
             {
                return -1;
@@ -2803,15 +2955,16 @@ static int ext2_alloc_block_bit(vnode_t * node, uint32_t *block)
    /* TODO: Slow allocation primitive. Should optimize */
    ext2_gd_t gd;
    int ret;
-   uint32_t i,j,b, block_offset;
+   //uint32_t i,j,b, block_offset;
+   uint32_t i,j,b;
    uint16_t group_index, segment_index, segment_offset;
    uint16_t inode_group;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
    *block = 0;
@@ -2836,13 +2989,16 @@ static int ext2_alloc_block_bit(vnode_t * node, uint32_t *block)
       /* All gd indicate that the group is full. No block available */
       return -1;
    }
-   block_offset = (gd.block_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
+   //block_offset = (gd.block_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
    for(segment_index=0, segment_offset = 0; segment_index < fsinfo->s_buff_per_block;
          segment_index++, segment_offset += fsinfo->s_buff_size)
    {
       /* Read node bitmap to bitmap_buffer */
-      ret = ext2_device_buf_read(dev, (uint8_t *)ext2_block_buffer,
-                                 block_offset + segment_offset,
+      //ret = ext2_device_buf_read(dev, (uint8_t *)ext2_block_buffer,
+      //                           block_offset + segment_offset,
+      //                           fsinfo->s_buff_size);
+      ret = ext2_device_buf_read(node->fs_info, (uint8_t *)ext2_block_buffer,
+                                 gd.block_bitmap, segment_offset,
                                  fsinfo->s_buff_size);
       if(ret)
       {
@@ -2886,8 +3042,11 @@ static int ext2_alloc_block_bit(vnode_t * node, uint32_t *block)
       return -1;   /* Should never happen */
    }
    /* Write modified bitmap to disk */
-   ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
-                              block_offset + segment_offset,
+   //ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
+   //                           block_offset + segment_offset,
+   //                           fsinfo->s_buff_size);
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)ext2_block_buffer,
+                              gd.block_bitmap, segment_offset,
                               fsinfo->s_buff_size);
    if(ret)
    {
@@ -2916,13 +3075,14 @@ static int ext2_dealloc_block_bit(vnode_t *node, uint32_t block)
 {
    ext2_gd_t gd;
    int ret;
-   uint32_t bitmap_offset, b, block_group;
+   //uint32_t bitmap_offset, b, block_group;
+   uint32_t b, block_group;
    uint8_t bitmap_byte;
 
-   Device dev;
+   //Device dev;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
    /* b is the inode number relative to current group, so its the bit offset in inode bitmap */
@@ -2938,8 +3098,9 @@ static int ext2_dealloc_block_bit(vnode_t *node, uint32_t block)
       return -1;
    }
    /* Read bitmap to bitmap_buffer */
-   bitmap_offset = (gd.block_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
-   ret = ext2_device_buf_read(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (b>>3), sizeof(uint8_t));
+   //bitmap_offset = (gd.block_bitmap)<<(10+fsinfo->e2sb.s_log_block_size);
+   //ret = ext2_device_buf_read(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (b>>3), sizeof(uint8_t));
+   ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&bitmap_byte, gd.block_bitmap, b>>3, sizeof(uint8_t));
    if(ret)
    {
       return -1;
@@ -2947,7 +3108,8 @@ static int ext2_dealloc_block_bit(vnode_t *node, uint32_t block)
    /* Clear bit from target byte */
    bitmap_byte &= (uint8_t)~(1<<(b&0x07));
    /* Write modified bitmap byte to disk */
-   ret = ext2_device_buf_write(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (b>>3), sizeof(uint8_t));
+   //ret = ext2_device_buf_write(dev, (uint8_t *)&bitmap_byte, bitmap_offset + (b>>3), sizeof(uint8_t));
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&bitmap_byte, gd.block_bitmap, b>>3, sizeof(uint8_t));
    if(ret)
    {
       return -1;
@@ -2994,18 +3156,19 @@ dpointer = (ext2_direntry_t *)((char*)dpointer + dpointer->rec_len);
 
 static int ext2_dir_add_entry(vnode_t *node, uint32_t ino, char *name, uint16_t namlen, uint8_t type)
 {
-   uint32_t data_block, block_offset, file_pointer;
+   //uint32_t data_block, block_offset, file_pointer;
+   uint32_t data_block, file_pointer;
    uint16_t new_entry_size, entry_pointer;
    int ret;
    uint8_t flag_entry_found = 0;
    //ext2_direntry_t ext2_dir_entry_buffer;
    ext2_direntry_t *ext2_dir_entry_buffer_p;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
    ext2_dir_entry_buffer_p = &ext2_dir_entry_buffer;
@@ -3025,12 +3188,13 @@ static int ext2_dir_add_entry(vnode_t *node, uint32_t ino, char *name, uint16_t 
          return -1;
       }
       /* block_offset points to the first byte address of the current block */
-      block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
+      //block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
       /* entry pointer iterates sequentially over the entries until it reaches the end of the block */
       for(entry_pointer = 0; entry_pointer < fsinfo->s_block_size; entry_pointer += ext2_dir_entry_buffer.rec_len)
       {
          /* Read entry fields, except for the name. 8 bytes in total */
-         ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
          ASSERT_MSG(0 == ret, "ext2_dir_add_entry(): ext2_device_buf_read() failed");
          if(ret)
          {
@@ -3071,7 +3235,8 @@ static int ext2_dir_add_entry(vnode_t *node, uint32_t ino, char *name, uint16_t 
             new_entry_size = ext2_dir_entry_buffer.rec_len - DENTRY_TOTAL_SIZE(ext2_dir_entry_buffer_p);
             /* Update current entry so that rec_len points to the start of the new entry */
             ext2_dir_entry_buffer.rec_len = DENTRY_TOTAL_SIZE(ext2_dir_entry_buffer_p);
-            ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+            //ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+            ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
             /* Point to the next entry */
             entry_pointer += ext2_dir_entry_buffer.rec_len;
             ext2_dir_entry_buffer.rec_len = new_entry_size;
@@ -3115,7 +3280,7 @@ static int ext2_dir_add_entry(vnode_t *node, uint32_t ino, char *name, uint16_t 
          return -1;
       }
       /* block_offset points to the first byte address of the current block  */
-      block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
+      //block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
       entry_pointer = 0;
       ext2_dir_entry_buffer.rec_len = fsinfo->s_block_size;
    }
@@ -3124,14 +3289,16 @@ static int ext2_dir_add_entry(vnode_t *node, uint32_t ino, char *name, uint16_t 
    ext2_dir_entry_buffer.file_type = type;
    ext2_dir_entry_buffer.name_len = namlen;
    /* Write the new entry to disk */
-   ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+   //ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
    ASSERT_MSG(0 == ret, "ext2_dir_add_entry(): ext2_device_buf_write() failed");
    if(ret)
    {
       return -1;
    }
    /* write the entry name to disk*/
-   ret = ext2_device_buf_write(dev, (uint8_t *)name, block_offset + entry_pointer + 8, ext2_dir_entry_buffer.name_len);
+   //ret = ext2_device_buf_write(dev, (uint8_t *)name, block_offset + entry_pointer + 8, ext2_dir_entry_buffer.name_len);
+   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)name, data_block, entry_pointer + 8, ext2_dir_entry_buffer.name_len);
    ASSERT_MSG(0 == ret, "ext2_dir_add_entry(): ext2_device_buf_write() failed");
    if(ret)
    {
@@ -3143,17 +3310,18 @@ static int ext2_dir_add_entry(vnode_t *node, uint32_t ino, char *name, uint16_t 
 
 static int ext2_dir_delete_entry(vnode_t *node, char *name, uint16_t namlen)
 {
-   uint32_t data_block, block_offset, file_pointer, aux;
+   //uint32_t data_block, block_offset, file_pointer, aux;
+   uint32_t data_block, file_pointer, aux;
    uint16_t entry_pointer, prev_entry_pointer;
    int ret;
    uint8_t flag_entry_found = 0;
    //ext2_direntry_t ext2_dir_entry_buffer;
 
-   Device dev;
+   //Device dev;
    ext2_file_info_t *finfo;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
@@ -3168,13 +3336,14 @@ static int ext2_dir_delete_entry(vnode_t *node, char *name, uint16_t namlen)
          return -1;
       }
       /* block_offset points to the first byte address of the current block */
-      block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
+      //block_offset = data_block<<(10+fsinfo->e2sb.s_log_block_size);
       /* entry pointer iterates sequentially over the entries until it reaches the end of the block */
       for(entry_pointer = 0, prev_entry_pointer = 0; entry_pointer < fsinfo->s_block_size;
             entry_pointer += ext2_dir_entry_buffer.rec_len)
       {
          /* Read entry fields, except for the name. 8 bytes in total */
-         ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
          if(ret)
          {
             return -1;
@@ -3184,7 +3353,9 @@ static int ext2_dir_delete_entry(vnode_t *node, char *name, uint16_t namlen)
             if(ext2_dir_entry_buffer.name_len == namlen)
             {
                /* Read the name of the entry */
-               ret = ext2_device_buf_read(dev, (uint8_t *)((uint8_t *)&ext2_dir_entry_buffer + 8), block_offset + entry_pointer + 8,
+               //ret = ext2_device_buf_read(dev, (uint8_t *)((uint8_t *)&ext2_dir_entry_buffer + 8), block_offset + entry_pointer + 8,
+               //                           ext2_dir_entry_buffer.name_len);
+               ret = ext2_device_buf_read(node->fs_info, (uint8_t *)((uint8_t *)&ext2_dir_entry_buffer + 8), data_block, entry_pointer + 8,
                                           ext2_dir_entry_buffer.name_len);
                if(ret)
                {
@@ -3211,7 +3382,8 @@ static int ext2_dir_delete_entry(vnode_t *node, char *name, uint16_t namlen)
    {
       /* Requested entry found. Delete it */
       ext2_dir_entry_buffer.inode = 0;
-      ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+      //ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + entry_pointer, 8);
+      ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, entry_pointer, 8);
       if(ret)
       {
          return -1;
@@ -3228,13 +3400,15 @@ static int ext2_dir_delete_entry(vnode_t *node, char *name, uint16_t namlen)
           * Deleted entry is now padding of previous entry
           */
          aux = ext2_dir_entry_buffer.rec_len;
-         ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + prev_entry_pointer, 8);
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + prev_entry_pointer, 8);
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, prev_entry_pointer, 8);
          if(ret)
          {
             return -1;
          }
          ext2_dir_entry_buffer.rec_len += aux;
-         ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + prev_entry_pointer, 8);
+         //ret = ext2_device_buf_write(dev, (uint8_t *)&ext2_dir_entry_buffer, block_offset + prev_entry_pointer, 8);
+         ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&ext2_dir_entry_buffer, data_block, prev_entry_pointer, 8);
          if(ret)
          {
             return -1;
@@ -3255,15 +3429,16 @@ static int ext2_fsinfo_flush(vnode_t *node)
    uint32_t group_offset;
    uint16_t group_index;
 
-   Device dev;
+   //Device dev;
    ext2_fs_info_t *fsinfo;
 
-   dev = node->fs_info->device;
+   //dev = node->fs_info->device;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
    for(group_index = 0; group_index<(fsinfo->s_groups_count); group_index++)
    {
-      group_offset = fsinfo->e2sb.s_blocks_per_group * fsinfo->s_block_size * group_index;
+      //group_offset = fsinfo->e2sb.s_blocks_per_group * fsinfo->s_block_size * group_index;
+      group_offset = 0;
       /* If the block size is 1024, block 0 is boot block, block 1 is superblock. Blocks 1 to 8192 are group 1 blocks
        * Boot block dont count as group 1 block
        */
@@ -3271,7 +3446,10 @@ static int ext2_fsinfo_flush(vnode_t *node)
       {
          group_offset = EXT2_SBOFF;
       }
-      ret = ext2_device_buf_write(dev, (uint8_t *)&(fsinfo->e2sb), group_offset, sizeof(ext2_superblock_t));
+      //ret = ext2_device_buf_write(dev, (uint8_t *)&(fsinfo->e2sb), group_offset, sizeof(ext2_superblock_t)); //fsinfo->e2sb.s_first_data_block
+      ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&(fsinfo->e2sb),
+                                    fsinfo->e2sb.s_first_data_block+ fsinfo->e2sb.s_blocks_per_group * group_index, group_offset,
+                                    sizeof(ext2_superblock_t));
       if(ret)
       {
          return -1;
@@ -3280,6 +3458,7 @@ static int ext2_fsinfo_flush(vnode_t *node)
    return 0;
 }
 
+#if 0 //Old version
 static ssize_t ext2_device_buf_read(Device dev, uint8_t * const buf, off_t const offset,
                                  size_t const nbyte)
 {
@@ -3304,7 +3483,9 @@ static ssize_t ext2_device_buf_read(Device dev, uint8_t * const buf, off_t const
 
    return 0;
 }
+#endif
 
+#if 0 //Old version
 static ssize_t ext2_device_buf_write(Device dev, uint8_t * const buf, off_t const offset,
                                  size_t const nbyte)
 {
@@ -3328,7 +3509,9 @@ static ssize_t ext2_device_buf_write(Device dev, uint8_t * const buf, off_t cons
    }
    return 0;
 }
+#endif
 
+#if 0 //Old version
 /* Writes to ext2_block_buffer */
 static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
                                  size_t nbyte)
@@ -3352,140 +3535,140 @@ static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
 
    return 0;
 }
+#endif
 
-#if 0
-
-/* BlockDevice interface implementation */
-static ssize_t storageUSB_read(StorageUSB self, uint8_t * const buf, size_t const nbyte)
+static ssize_t ext2_device_buf_read(filesystem_info_t *fs_info, uint8_t * buf, uint32_t block, off_t const offset,
+                                 size_t const nbyte)
 {
    ssize_t ret = -1;
-   size_t bytes_left, bytes_read, i, sector, position, bytes_offset;
-   assert(ooc_isInstanceOf(self, StorageUSB));
+   size_t bytes_left, sector_offset, buf_offset, byte_position, read_size, sector;
+   BlockDevice bdev = ooc_get_interface((Object) fs_info->device, BlockDevice);
+   ext2_fs_info_t *fsinfo;
 
-   i=0; bytes_left = nbyte; sector = self->position / self->DiskCapacity.BlockSize; position = self->position;
-   while(bytes_left)
+   fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
+
+   if(bdev)
    {
-      bytes_offset = position % self->DiskCapacity.BlockSize;
-      bytes_read = (bytes_left > (self->DiskCapacity.BlockSize - bytes_offset)) ? (self->DiskCapacity.BlockSize - bytes_offset) : bytes_left;
-      if(storageUSB_singleBlockRead(self, self->block_buf, sector) == 0)
+      sector = (block * fsinfo->sectors_in_block) + (offset / fsinfo->sector_size);
+      bytes_left = nbyte; byte_position = offset; buf_offset = 0;
+      while(bytes_left)
       {
-         memcpy(buf + i, self->block_buf + bytes_offset, bytes_read);
-         bytes_left -= bytes_read;
-         i += bytes_read;
-         position += bytes_read;
+         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         if(ret!=1)
+         {
+            break;
+         }
+         sector_offset = byte_position % fsinfo->sector_size;
+         read_size = fsinfo->sector_size - sector_offset;
+         memcpy((void *)((uint8_t *)buf + buf_offset), (void *)((uint8_t *)ext2_block_buffer + sector_offset), read_size);
+         buf_offset += read_size;
+         byte_position += read_size;
+         bytes_left -= read_size;
          sector++;
       }
-      else
-      {
-         break;
-      }
+      if(!bytes_left) ret = 0;
    }
-   if(0 == bytes_left)
-   {
-      ret = i;
-      self->position += i;
-   }
-   else
-   {
-
-   }
-
    return ret;
 }
 
-static ssize_t ext2_device_buf_read(Device dev, uint8_t * const buf, uint32_t block, off_t const offset,
+static ssize_t ext2_device_buf_write(filesystem_info_t *fs_info, uint8_t * const buf, uint32_t block, off_t const offset,
                                  size_t const nbyte)
 {
    ssize_t ret = -1;
-   size_t bytes_left, bytes_read, i, sector, position, bytes_offset;
-   BlockDevice bdev = ooc_get_interface((Object) dev, BlockDevice);
+   size_t bytes_left, sector_offset, buf_offset, byte_position, write_size, sector;
+   BlockDevice bdev = ooc_get_interface((Object) fs_info->device, BlockDevice);
+   ext2_fs_info_t *fsinfo;
 
-   if(!bdev)
+   fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
+
+   if(bdev)
    {
-      return -1;
-   }
-
-   i=0; bytes_left = nbyte; sector = self->position / self->DiskCapacity.BlockSize; position = self->position;
-
-   //fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */ /* FIXME: Sector size not unbedingt 512 */
-   sector = block * fsinfo->sectors_in_block + offset / self->DiskCapacity.BlockSize;
-   while(bytes_left)
-   {
-
-      ret = bdev->read((Object)dev, buf, sector, count);
-      if(ret!=nbyte)
+      sector = (block * fsinfo->sectors_in_block) + (offset / fsinfo->sector_size);
+      bytes_left = nbyte; byte_position = offset; buf_offset = 0;
+      while(bytes_left)
       {
-         return -1;
+         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         if(ret!=1)
+         {
+            break;
+         }
+         sector_offset = byte_position % fsinfo->sector_size;
+         write_size = fsinfo->sector_size - sector_offset;
+         memcpy((void *)((uint8_t *)ext2_block_buffer + sector_offset), (void *)((uint8_t *)buf + buf_offset), write_size);
+         ret = bdev->write((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         if(ret!=1)
+         {
+            break;
+         }
+         buf_offset += write_size;
+         byte_position += write_size;
+         bytes_left -= write_size;
+         sector++;
       }
-
-   return 0;
-}
-
-static ssize_t ext2_device_buf_write(Device dev, uint8_t * const buf, off_t const offset,
-                                 size_t const nbyte)
-{
-   ssize_t ret;
-   BlockDevice bdev = ooc_get_interface((Object) dev, BlockDevice);
-
-   if(!bdev)
-   {
-      return -1;
+      if(!bytes_left) ret = 0;
    }
-
-   ret = bdev->lseek((Object)dev, offset, SEEK_SET);
-   if(ret!=offset)
-   {
-      return -1;
-   }
-   ret = bdev->write((Object)dev, buf, nbyte);
-   if(ret!=nbyte)
-   {
-      return -1;
-   }
-   return 0;
+   return ret;
 }
 
 /* Writes to ext2_block_buffer */
-static int ext2_device_buf_memset(Device dev, uint8_t c, off_t const offset,
+static int ext2_device_buf_memset(filesystem_info_t *fs_info, uint8_t c, uint32_t block, off_t const offset,
                                  size_t nbyte)
 {
-   uint32_t write_offset, write_size;
-   ssize_t ret;
+   ssize_t ret = -1;
+   size_t bytes_left, sector_offset, buf_offset, byte_position, write_size, sector;
+   BlockDevice bdev = ooc_get_interface((Object) fs_info->device, BlockDevice);
+   ext2_fs_info_t *fsinfo;
 
-   memset(ext2_block_buffer, c, EXT2_BLOCK_BUFFER_SIZE);
-   write_offset = offset;
-   while(nbyte)
+   fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
+
+   if(bdev)
    {
-      write_size = nbyte <= EXT2_BLOCK_BUFFER_SIZE ? nbyte : EXT2_BLOCK_BUFFER_SIZE;
-      ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer, write_offset, write_size);
-      if(ret)
+      memset(ext2_block_buffer, c, EXT2_BLOCK_BUFFER_SIZE);
+      sector = (block * fsinfo->sectors_in_block) + (offset / fsinfo->sector_size);
+      bytes_left = nbyte; byte_position = offset; buf_offset = 0;
+      while(bytes_left)
       {
-         return -1;
+         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         if(ret!=1)
+         {
+            break;
+         }
+         sector_offset = byte_position % fsinfo->sector_size;
+         write_size = fsinfo->sector_size - sector_offset;
+         memset((void *)((uint8_t *)ext2_block_buffer + sector_offset), c, write_size);
+         ret = bdev->write((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         if(ret!=1)
+         {
+            break;
+         }
+         buf_offset += write_size;
+         byte_position += write_size;
+         bytes_left -= write_size;
+         sector++;
       }
-      nbyte -= write_size;
-      write_offset += write_size;
+      if(!bytes_left) ret = 0;
    }
-
-   return 0;
+   return ret;
 }
 
-#endif
 
 /* For a max partition size of 4GB, there is a maximum of 512 groups */
 /* Is it unnecesary to pass the node as argument? */
 static int ext2_get_groupdesc(filesystem_info_t *fs_info, uint16_t ngroup, ext2_gd_t *gdp)
 {
-   Device dev;
+   //Device dev;
    ext2_fs_info_t *fsinfo;
    uint32_t offset;
    int ret;
 
-   dev = fs_info->device;
+   //dev = fs_info->device;
    fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
 
-   offset = (fsinfo->e2sb.s_first_data_block + 1) * fsinfo->s_block_size + ngroup * sizeof(ext2_gd_t);
+   //offset = (fsinfo->e2sb.s_first_data_block + 1) * fsinfo->s_block_size + ngroup * sizeof(ext2_gd_t);
+   offset = ngroup * sizeof(ext2_gd_t);
    //printf("ext2_get_groupdesc(): Read in offset %d\n", offset);
-   ret = ext2_device_buf_read(dev, (uint8_t *)gdp, offset, sizeof(ext2_gd_t));
+   //ret = ext2_device_buf_read(dev, (uint8_t *)gdp, offset, sizeof(ext2_gd_t));
+   ret = ext2_device_buf_read(fs_info, (uint8_t *)gdp, fsinfo->e2sb.s_first_data_block + 1, offset, sizeof(ext2_gd_t));
    if(ret)
    {
       return -1;
@@ -3496,21 +3679,25 @@ static int ext2_get_groupdesc(filesystem_info_t *fs_info, uint16_t ngroup, ext2_
 static int ext2_set_groupdesc(filesystem_info_t *fs_info, uint16_t ngroup, ext2_gd_t *gdp)
 {
    uint32_t group_offset;
-   Device dev;
+   //Device dev;
    ext2_fs_info_t *fsinfo;
    int ret;
    uint16_t group_index;
 
-   dev = fs_info->device;
+   //dev = fs_info->device;
    fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
 
    for(group_index = 0; group_index<(fsinfo->s_groups_count); group_index++)
    {
-      group_offset = fsinfo->e2sb.s_first_data_block * fsinfo->s_block_size +
-                     fsinfo->e2sb.s_blocks_per_group * fsinfo->s_block_size * group_index;
+      //group_offset = fsinfo->e2sb.s_first_data_block * fsinfo->s_block_size +
+      //               fsinfo->e2sb.s_blocks_per_group * fsinfo->s_block_size * group_index;
+      group_offset = fsinfo->e2sb.s_first_data_block +
+                     fsinfo->e2sb.s_blocks_per_group * group_index;
 
-      ret = ext2_device_buf_write(dev, (uint8_t *)gdp,
-                                    group_offset + fsinfo->s_block_size + ngroup * sizeof(ext2_gd_t), sizeof(ext2_gd_t));
+      //ret = ext2_device_buf_write(dev, (uint8_t *)gdp,
+      //                              group_offset + fsinfo->s_block_size + ngroup * sizeof(ext2_gd_t), sizeof(ext2_gd_t));
+      ret = ext2_device_buf_write(fs_info, (uint8_t *)gdp,
+                                    group_offset + 1, ngroup * sizeof(ext2_gd_t), sizeof(ext2_gd_t));
       if(ret)
       {
          return -1;
@@ -3522,13 +3709,13 @@ static int ext2_set_groupdesc(filesystem_info_t *fs_info, uint16_t ngroup, ext2_
 static int ext2_set_inode(filesystem_info_t *fs_info, uint32_t inumber, ext2_inode_t *node)
 {
    ext2_gd_t gd;
-   Device dev;
+   //Device dev;
    ext2_fs_info_t *fsinfo;
    uint32_t inode_offset;
    uint16_t inode_group;
    int ret;
 
-   dev = fs_info->device;
+   //dev = fs_info->device;
    fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
 
    /* Verify to avoid division by 0 */
@@ -3545,9 +3732,11 @@ static int ext2_set_inode(filesystem_info_t *fs_info, uint32_t inumber, ext2_ino
    {
       return -1;
    }
-   inode_offset = (gd.inode_table)*(fsinfo->s_block_size) +
-                  ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
-   ret = ext2_device_buf_write(dev, (uint8_t *)node, inode_offset, sizeof(ext2_inode_t));
+   //inode_offset = (gd.inode_table)*(fsinfo->s_block_size) +
+   //               ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
+   inode_offset = ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
+   //ret = ext2_device_buf_write(dev, (uint8_t *)node, inode_offset, sizeof(ext2_inode_t));
+   ret = ext2_device_buf_write(fs_info, (uint8_t *)node, gd.inode_table, inode_offset, sizeof(ext2_inode_t));
    if(ret)
    {
       return -1;
@@ -3561,13 +3750,13 @@ static int ext2_get_inode(filesystem_info_t *fs_info, uint32_t inumber, ext2_ino
    uint32_t inode_group, inode_offset;
    ext2_gd_t gd;
 
-   Device dev;
+   //Device dev;
    ext2_fs_info_t *fsinfo;
 
-   dev = fs_info->device;
+   //dev = fs_info->device;
    fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
 
-   if(NULL == fsinfo || NULL == dev)
+   if(NULL == fsinfo)
    {
       return -1;
    }
@@ -3586,9 +3775,11 @@ static int ext2_get_inode(filesystem_info_t *fs_info, uint32_t inumber, ext2_ino
    {
       return -1;
    }
-   inode_offset = (gd.inode_table)*(fsinfo->s_block_size) +
-                  ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
-   ret = ext2_device_buf_read(dev, (uint8_t *)node, inode_offset, sizeof(ext2_inode_t));
+   //inode_offset = (gd.inode_table)*(fsinfo->s_block_size) +
+   //               ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
+   inode_offset = ((inumber-1)%fsinfo->e2sb.s_inodes_per_group)*(fsinfo->e2sb.s_inode_size);
+   //ret = ext2_device_buf_read(dev, (uint8_t *)node, inode_offset, sizeof(ext2_inode_t));
+   ret = ext2_device_buf_read(fs_info, (uint8_t *)node, gd.inode_table, inode_offset, sizeof(ext2_inode_t));
    if(0 > ret)
    {
       return -1;

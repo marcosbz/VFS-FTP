@@ -109,9 +109,11 @@ typedef enum
 /*==================[external data declaration]==============================*/
 DeclareInterface(BlockDevice)
 
-   ssize_t (* read)(Object, uint8_t * const buf, size_t const nbyte);
-   ssize_t (* write)(Object, uint8_t const * const buf, size_t const nbyte);
-   ssize_t (* lseek)(Object, off_t const offset, uint8_t const whence);
+   //ssize_t (* read)(Object, uint8_t * const buf, size_t const nbyte); // Old version, could not support dev larger than 4GB
+   //ssize_t (* write)(Object, uint8_t const * const buf, size_t const nbyte);  // Old version, could not support dev larger than 4GB
+   ssize_t (* write)(Object, uint8_t const * const buf, uint32_t sector, size_t count);
+   ssize_t (* read)(Object, uint8_t * const buf, uint32_t sector, size_t count);
+   //ssize_t (* lseek)(Object, off_t const offset, uint8_t const whence); // Old version, remove useless lseek
    int (* ioctl)(Object, int32_t request, void* param);
    int (* connect)(Object);
    int (* disconnect)(Object);

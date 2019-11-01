@@ -182,6 +182,7 @@ DRESULT disk_ioctl(BYTE drv, BYTE ctrl, void *buff)
    return res;
 }
 
+#if 0
 /* Read Sector(s) */
 DRESULT disk_read(BYTE drv, BYTE *buff, DWORD sector, BYTE count)
 {
@@ -225,6 +226,42 @@ DRESULT disk_read(BYTE drv, BYTE *buff, DWORD sector, BYTE count)
 
    return RES_OK;
 }
+#endif
+
+/* Read Sector(s) */
+DRESULT disk_read(BYTE drv, BYTE *buff, DWORD sector, BYTE count)
+{
+   DRESULT res;
+   BlockDevice bdev;
+   blockDevState_t blockDevState;
+
+   if (NULL == fat_device_association_list[drv]) {
+      return RES_PARERR;
+   }
+
+   bdev = ooc_get_interface((Object)(fat_device_association_list[drv]), BlockDevice);
+   if(bdev == NULL)
+   {
+      return RES_ERROR;
+   }
+
+   if( 0 > bdev->getState((Object)(fat_device_association_list[drv]), &blockDevState) )
+   {
+      return RES_ERROR;
+   }
+   if( BLKDEV_READY != blockDevState)
+   {
+      return RES_NOTRDY;
+   }
+
+   if( count != bdev->read((Object)(fat_device_association_list[drv]), buff, sector, count) )
+
+   {
+      return RES_ERROR;
+   }
+
+   return RES_OK;
+}
 
 /* Get Disk Status */
 DSTATUS disk_status(BYTE drv)
@@ -253,6 +290,7 @@ DSTATUS disk_status(BYTE drv)
    return STA_NOINIT;
 }
 
+#if 0
 /* Write Sector(s) */
 DRESULT disk_write(BYTE drv, const BYTE *buff, DWORD sector, BYTE count)
 {
@@ -295,4 +333,40 @@ DRESULT disk_write(BYTE drv, const BYTE *buff, DWORD sector, BYTE count)
    }
 
    return RES_OK;
+}
+#endif
+
+/* Write Sector(s) */
+DRESULT disk_write(BYTE drv, const BYTE *buff, DWORD sector, BYTE count)
+{
+   DRESULT res;
+   BlockDevice bdev;
+   blockDevState_t blockDevState;
+
+   if (NULL == fat_device_association_list[drv]) {
+      return RES_PARERR;
+   }
+
+   bdev = ooc_get_interface((Object)(fat_device_association_list[drv]), BlockDevice);
+   if(bdev == NULL)
+   {
+      return RES_ERROR;
+   }
+
+   if( 0 > bdev->getState((Object)(fat_device_association_list[drv]), &blockDevState) )
+   {
+      return RES_ERROR;
+   }
+   if( BLKDEV_READY != blockDevState)
+   {
+      return RES_NOTRDY;
+   }
+
+   if( count != bdev->write((Object)(fat_device_association_list[drv]), buff, sector, count) )
+   {
+      return RES_ERROR;
+   }
+
+   return RES_OK;
+
 }

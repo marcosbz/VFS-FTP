@@ -93,9 +93,11 @@ static const mmc_SPICMDInfo mmc_SPICMDList[] =
 
 /*==================[internal functions declaration]=========================*/
 /* BlockDevice interface implementation */
-static ssize_t mmcSPI_read(MmcSPI self, uint8_t * const buf, size_t const nbyte);
-static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, size_t const nbyte);
-static ssize_t mmcSPI_lseek(MmcSPI self, off_t const offset, uint8_t const whence);
+//static ssize_t mmcSPI_read(MmcSPI self, uint8_t * const buf, size_t const nbyte); //Old version
+//static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, size_t const nbyte); //Old version
+static ssize_t mmcSPI_read(MmcSPI self, uint8_t * const buf, uint32_t sector, size_t count);
+static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, uint32_t sector, size_t count);
+//static ssize_t mmcSPI_lseek(MmcSPI self, off_t const offset, uint8_t const whence); //Old version
 static int mmcSPI_ioctl(MmcSPI self, int32_t request, void* param);
 static int mmcSPI_connect(MmcSPI self);
 static int mmcSPI_disconnect(MmcSPI self);
@@ -126,9 +128,11 @@ static void MmcSPI_initialize( Class this )
    /* Init vtable and override/assign virtual functions */
    MmcSPIVtable vtab = & MmcSPIVtableInstance;
 
-   vtab->BlockDevice.read = (ssize_t (*)(Object, uint8_t * const, size_t const))mmcSPI_read;
-   vtab->BlockDevice.write = (ssize_t (*)(Object, uint8_t const * const buf, size_t const))mmcSPI_write;
-   vtab->BlockDevice.lseek = (ssize_t (*)(Object, off_t const, uint8_t const))mmcSPI_lseek;
+   //vtab->BlockDevice.read = (ssize_t (*)(Object, uint8_t * const, size_t const))mmcSPI_read; //Old version
+   //vtab->BlockDevice.write = (ssize_t (*)(Object, uint8_t const * const buf, size_t const))mmcSPI_write; //Old version
+   vtab->BlockDevice.read = (ssize_t (*)(Object, uint8_t * const buf, uint32_t sector, size_t count))mmcSPI_read;
+   vtab->BlockDevice.write = (ssize_t (*)(Object, uint8_t const * const buf, uint32_t sector, size_t count))mmcSPI_write;
+   //vtab->BlockDevice.lseek = (ssize_t (*)(Object, off_t const, uint8_t const))mmcSPI_lseek; //Old version
    vtab->BlockDevice.ioctl = (int (*)(Object, int32_t, void*))mmcSPI_ioctl;
    vtab->BlockDevice.connect = (int (*)(Object))mmcSPI_connect;
    vtab->BlockDevice.disconnect = (int (*)(Object))mmcSPI_disconnect;
@@ -314,6 +318,7 @@ uint32_t mmcSPI_getSize(MmcSPI self)
    return self->nsectors;
 }
 
+#if 0 //Old version
 /* BlockDevice interface implementation */
 static ssize_t mmcSPI_read(MmcSPI self, uint8_t * const buf, size_t const nbyte)
 {
@@ -351,7 +356,44 @@ static ssize_t mmcSPI_read(MmcSPI self, uint8_t * const buf, size_t const nbyte)
 
    return ret;
 }
+#endif
 
+static ssize_t mmcSPI_read(MmcSPI self, uint8_t * const buf, uint32_t sector, size_t count)
+{
+   ssize_t ret = -1;
+   uint32_t i, position;
+
+   assert(ooc_isInstanceOf(self, MmcSPI));
+
+   i=0;
+   position = 0; /* Offset in destination buffer */
+   while(count)
+   {
+      if( mmcSPI_singleBlockRead(self, self->block_buf, sector + i) == 0 )
+      {
+         memcpy(buf + position, self->block_buf, self->block_size);
+         count--;
+         position += self->block_size;
+         i++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == count)
+   {
+      ret = i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+#if 0 //Old version
 static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, size_t const nbyte)
 {
    ssize_t ret = -1;
@@ -397,7 +439,43 @@ static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, size_t const
 
    return ret;
 }
+#endif
 
+static ssize_t mmcSPI_write(MmcSPI self, uint8_t const * const buf, uint32_t sector, size_t count)
+{
+   ssize_t ret = -1;
+   uint32_t i, position;
+
+   assert(ooc_isInstanceOf(self, MmcSPI));
+
+   i=0;
+   position = 0; /* Offset in destination buffer */
+   while(count)
+   {
+      if( mmcSPI_singleBlockWrite(self, buf + position, sector + i) == 0 )
+      {
+         count--;
+         position += self->block_size;
+         i++;
+      }
+      else
+      {
+         break;
+      }
+   }
+   if(0 == count)
+   {
+      ret = i;
+   }
+   else
+   {
+
+   }
+
+   return ret;
+}
+
+#if 0 //Old version
 static ssize_t mmcSPI_lseek(MmcSPI self, off_t const offset, uint8_t const whence)
 {
    assert(ooc_isInstanceOf(self, MmcSPI));
@@ -424,6 +502,7 @@ static ssize_t mmcSPI_lseek(MmcSPI self, off_t const offset, uint8_t const whenc
 
    return destination;
 }
+#endif
 
 static int mmcSPI_ioctl(MmcSPI self, int32_t request, void* param)
 {

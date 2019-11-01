@@ -169,7 +169,7 @@ ClassMembers( MmcSPI, Device )
    uint8_t block_buf[512];
 
    /* BlockDevice */
-   uint32_t position;
+   //uint32_t position; //Old version
 
 EndOfClassMembers;
 
