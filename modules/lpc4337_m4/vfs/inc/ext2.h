@@ -72,6 +72,10 @@
 #define EXT2_MAX_MOUNTS 32
 /** \brief Size of array ext2_block_buffer defined in ext2.c. Its used to read and write portions of blocks */
 #define EXT2_BLOCK_BUFFER_SIZE 1024
+
+/** \brief Size of array ext2_sector_buffer defined in ext2.c. Its used to read and write sectors, assuming 512B sectors FIXME */
+#define EXT2_SECTOR_BUFFER_SIZE 512
+
 /** \brief ext2_block_buffer */
 #define EXT2_PATH_MAX 50
 

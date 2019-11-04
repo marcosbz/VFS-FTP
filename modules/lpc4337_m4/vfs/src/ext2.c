@@ -538,6 +538,7 @@ fsdriver_operations_t ext2_driver_operations =
  *
  */
 uint8_t ext2_block_buffer[EXT2_BLOCK_BUFFER_SIZE];
+uint8_t ext2_sector_buffer[EXT2_SECTOR_BUFFER_SIZE]; /* Used by ext2_device_buf_read/write/memset. FIXME: provisory */
 ext2_direntry_t ext2_dir_entry_buffer;
 ext2_inode_t ext2_node_buffer;
 
@@ -1396,14 +1397,6 @@ static int ext2_mount(filesystem_info_t *fs, vnode_t *dest_node)
    }
    /* Load file system information to memory */
    dev = dest_node->fs_info->device;
-   //ret = ext2_get_superblock(dev, &(fsinfo->e2sb));
-   ret = ext2_get_superblock(dest_node->fs_info, &(fsinfo->e2sb));
-   ASSERT_MSG(ret>=0, "ext2_mount(): Could not get superblock");
-   if(ret)
-   {
-      return -1;
-   }
-
    bdev = ooc_get_interface((Object) dev, BlockDevice);
    if(!bdev)
    {
@@ -1415,12 +1408,21 @@ static int ext2_mount(filesystem_info_t *fs, vnode_t *dest_node)
    {
       return -1;
    }
-
+   /* Must set this field prior to use ext2_get_superblock() */
+   fsinfo->sector_size = blockInfo.size;
+   //fsinfo->sectors_in_block = fsinfo->s_block_size / fsinfo->sector_size;
+   //ret = ext2_get_superblock(dev, &(fsinfo->e2sb));
+   ret = ext2_get_superblock(dest_node->fs_info, &(fsinfo->e2sb));
+   ASSERT_MSG(ret>=0, "ext2_mount(): Could not get superblock");
+   if(ret)
+   {
+      return -1;
+   }
    /* Calculate the number of group descriptors from the superblock info */
    ASSERT_MSG(fsinfo->e2sb.s_inodes_per_group>0, "ext2_mount(): s_inodes_per_group zero. Error");
    fsinfo->s_groups_count = (fsinfo->e2sb.s_inodes_count)/(fsinfo->e2sb.s_inodes_per_group);
    fsinfo->s_block_size = 1024 << fsinfo->e2sb.s_log_block_size;
-   fsinfo->sector_size = blockInfo.size;
+   //fsinfo->sector_size = blockInfo.size; /* Was set previously */
    //fsinfo->sectors_in_block = fsinfo->s_block_size >> 9;   /* s_block_size/512 */ /* FIXME: Sector size not unbedingt 512 */
    fsinfo->sectors_in_block = fsinfo->s_block_size / fsinfo->sector_size;
    fsinfo->s_inodes_per_block = (fsinfo->s_block_size)/(fsinfo->e2sb.s_inode_size);
@@ -2679,12 +2681,7 @@ static int ext2_alloc_inode_bit(vnode_t *node, uint32_t *new_inumber_p)
        */
       return -1;
    }
-   //ret = ext2_device_buf_write(dev, (uint8_t *)ext2_block_buffer,
-   //                           block_offset + segment_offset,
-   //                           fsinfo->s_buff_size);
-   ret = ext2_device_buf_write(node->fs_info, (uint8_t *)ext2_block_buffer,
-                              gd.inode_bitmap, segment_offset,
-                              fsinfo->s_buff_size);
+
    /* Found byte with free bit in block located in block_offset, offset (segment_offset + i) */
    /* Find free bit inside the found byte */
    for(j = 0; j < 8; j++)
@@ -2795,6 +2792,157 @@ static int ext2_dealloc_inode_bit(vnode_t *node)
 /* TODO: Validate arguments */
 /*FIXME: Borro el bloque determinado por el numero contenido en new_block. Pero new_block puede no estar inicializado */
 /*FIXME: Designed only for 1024 bytes block. Fix for the general case*/
+static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *device_block_p)
+{
+   int ret;
+   //uint32_t block_pos, new_block, temp_block_num, index_offset, block_offset;
+   uint32_t block_pos, new_block, temp_block_num, lm_block_num, ln_block_num, index_offset;
+   uint8_t shift_block_level, shift_single_block_level, block_level, flag_new_block;
+   ext2_inode_t *pinode;
+
+   //Device dev;
+   ext2_file_info_t *finfo;
+   ext2_fs_info_t *fsinfo;
+
+   //dev = node->fs_info->device;
+   finfo = (ext2_file_info_t *)node->f_info.down_layer_info;
+   fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
+
+   if(NULL == device_block_p)
+      return -1;
+
+   pinode = &ext2_node_buffer;
+   ret = ext2_get_inode(node->fs_info, finfo->f_inumber, pinode);
+   if(0 > ret)
+   {
+      return -1;
+   }
+   flag_new_block = 0;   /* To tell if a new file block is being allocated */
+   new_block = 0;
+   *device_block_p = 0;
+   block_pos = file_block;
+   if (block_pos < N_DIRECT_BLOCKS)
+   {
+      if(0 == pinode->i_block[block_pos])
+      {
+         ret = ext2_alloc_block_bit(node, &new_block);
+         ASSERT_MSG(ret>=0, "ext2_file_map_alloc(): ext2_alloc_block_bit() failed");
+         if(ret)
+         {
+            return -1;
+         }
+         pinode->i_block[block_pos] = new_block;
+         pinode->i_blocks += fsinfo->sectors_in_block;
+         flag_new_block = 1;
+      }
+      *device_block_p = pinode->i_block[block_pos];
+   }
+   else
+   {
+      /*
+       * 0:EXT2_DIR_BLOCK-1
+       * EXT2_DIR_BLOCK:EXT2_DIR_BLOCK+(1<<shift_single_block_level)-1
+       * EXT2_DIR_BLOCK+(1<<shift_single_block_level):EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))-1
+       * EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))-1:
+       * EXT2_DIR_BLOCK+(1<<shift_single_block_level)+(1<<2*(shift_single_block_level))+(1<<3*(shift_single_block_level))-1
+       */
+      /* Wanto to calculate shift_block_level */
+      shift_single_block_level = 10 + (fsinfo->e2sb.s_log_block_size) - 2;   /* log(block_size/4). How much 4 byte entries in 1 block */
+      block_pos -= N_DIRECT_BLOCKS;
+      /* Calculate level of indirection */
+      /* At first, get entry offset from N_DIRECT_BLOCKS */
+      /* block_pos >= 256? Then it cant be in first level of indirection. Begin from offset 256 (block_pos -= 256) and check next level */
+      /* block_pos >= 256*256? Then it cant be in second level of indirection. Begin from offset 256*256 (block_pos -= 256*256) and check next level */
+      for (   shift_block_level=0, block_level=1;
+         block_pos >= (int32_t)1<<(shift_single_block_level+shift_block_level);
+         block_pos -= (int32_t)1<<(shift_single_block_level+shift_block_level),
+         shift_block_level += shift_single_block_level, block_level++)
+      {
+         if (block_level > N_INDIRECT_BLOCKS)
+         {
+            return -1;
+         }
+      }
+
+      temp_block_num = pinode->i_block[N_DIRECT_BLOCKS - 1 + block_level];
+      if (0 == temp_block_num)
+      {
+         /* No entry block allocated for this level. Entry block must be set to 0 */
+         ret = ext2_alloc_block_bit(node, &temp_block_num);
+         if(ret)
+         {
+            return -1;
+         }
+         //ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+         ret = ext2_device_buf_memset(node->fs_info, 0, temp_block_num, 0, fsinfo->s_block_size);
+         if(ret)
+         {
+            return -1;
+         }
+         pinode->i_block[N_DIRECT_BLOCKS - 1 + block_level] = temp_block_num;
+         pinode->i_blocks += fsinfo->sectors_in_block;
+      }
+
+      lm_block_num = temp_block_num;
+      /* block_level will tell the indirection level. shift_block_level is the shift of the mask */
+      for (;block_level;block_level--)
+      {
+         /* Calculate offset of the indirect block number contained in the current indirect block */
+         /* 1: lm_block_num is the block indicated in the inode (0-256)*/
+         /* 2: lm_block_num is the block indicated in the entry in the first level entry block (256-256*256) */
+         /* 3: lm_block_num is the block indicated in the entry in the second level entry block (256*256-256*256*256) */
+         //index_offset =   (temp_block_num << (10+fsinfo->e2sb.s_log_block_size)) +
+         //                 (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+         //                 >> shift_block_level) * sizeof(uint32_t);
+         index_offset =   (( block_pos & (/*Mask*/((1<<shift_single_block_level)-1) << shift_block_level/*/Mask*/) )
+                          >> shift_block_level) * sizeof(uint32_t);
+         /* Read next indirection levels block. First block entry not in inode */
+         //ret = ext2_device_buf_read(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+         ret = ext2_device_buf_read(node->fs_info, (uint8_t *)&ln_block_num, lm_block_num, index_offset, sizeof(uint32_t));
+         if(ret)
+         {
+            return -1;
+         }
+         /* Block number was not allocated. Allocate a block and write its number in the found position */
+         if (0 == ln_block_num)
+         {
+            ret = ext2_alloc_block_bit(node, &ln_block_num);
+            if(ret)
+            {
+               return -1;
+            }
+            //ret = ext2_device_buf_memset(dev, 0, temp_block_num << (10+fsinfo->e2sb.s_log_block_size), fsinfo->s_block_size);
+            ret = ext2_device_buf_memset(node->fs_info, 0, ln_block_num, 0, fsinfo->s_block_size);
+            if(ret)
+            {
+               return -1;
+            }
+            //ret = ext2_device_buf_write(dev, (uint8_t *)&temp_block_num, index_offset, sizeof(uint32_t));
+            ret = ext2_device_buf_write(node->fs_info, (uint8_t *)&ln_block_num, lm_block_num, index_offset, sizeof(uint32_t));
+            if(ret)
+            {
+               return -1;
+            }
+            if(block_level) flag_new_block = 1; /* New data block has been allocated */
+         }
+         lm_block_num = ln_block_num;
+      }
+      new_block = lm_block_num;
+      *device_block_p = lm_block_num;
+   }
+   if(1 == flag_new_block)
+   {
+      /* Erase the contents of the new reserved data block? */
+   }
+   ret = ext2_set_inode(node->fs_info, finfo->f_inumber, pinode);
+   if(0 > ret)
+   {
+      return -1;
+   }
+
+   return 0;
+}
+#if 0
 static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *device_block_p)
 {
    int ret;
@@ -2943,8 +3091,7 @@ static int ext2_file_map_alloc(vnode_t *node, uint32_t file_block, uint32_t *dev
 
    return 0;
 }
-
-
+#endif
 
 /* Tries to alloc a block in the same group as the file */
 /* Modifies bookkeeping info */
@@ -3549,18 +3696,20 @@ static ssize_t ext2_device_buf_read(filesystem_info_t *fs_info, uint8_t * buf, u
 
    if(bdev)
    {
-      sector = (block * fsinfo->sectors_in_block) + (offset / fsinfo->sector_size);
+      /* Set fsinfo->sector_size in ext2_mount() */
+      sector = (block * fsinfo->sectors_in_block) + (offset / fsinfo->sector_size); /* FIXME: Replace fsinfo->sector_size with blockInfo.size? */
       bytes_left = nbyte; byte_position = offset; buf_offset = 0;
       while(bytes_left)
       {
-         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_sector_buffer, sector, 1);
          if(ret!=1)
          {
             break;
          }
          sector_offset = byte_position % fsinfo->sector_size;
          read_size = fsinfo->sector_size - sector_offset;
-         memcpy((void *)((uint8_t *)buf + buf_offset), (void *)((uint8_t *)ext2_block_buffer + sector_offset), read_size);
+         read_size = read_size > bytes_left ? bytes_left : read_size;
+         memcpy((void *)((uint8_t *)buf + buf_offset), (void *)((uint8_t *)ext2_sector_buffer + sector_offset), read_size);
          buf_offset += read_size;
          byte_position += read_size;
          bytes_left -= read_size;
@@ -3587,15 +3736,16 @@ static ssize_t ext2_device_buf_write(filesystem_info_t *fs_info, uint8_t * const
       bytes_left = nbyte; byte_position = offset; buf_offset = 0;
       while(bytes_left)
       {
-         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_sector_buffer, sector, 1);
          if(ret!=1)
          {
             break;
          }
          sector_offset = byte_position % fsinfo->sector_size;
          write_size = fsinfo->sector_size - sector_offset;
-         memcpy((void *)((uint8_t *)ext2_block_buffer + sector_offset), (void *)((uint8_t *)buf + buf_offset), write_size);
-         ret = bdev->write((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         write_size = write_size > bytes_left ? bytes_left : write_size;
+         memcpy((void *)((uint8_t *)ext2_sector_buffer + sector_offset), (void *)((uint8_t *)buf + buf_offset), write_size);
+         ret = bdev->write((Object)fs_info->device, (uint8_t *)ext2_sector_buffer, sector, 1);
          if(ret!=1)
          {
             break;
@@ -3615,7 +3765,7 @@ static int ext2_device_buf_memset(filesystem_info_t *fs_info, uint8_t c, uint32_
                                  size_t nbyte)
 {
    ssize_t ret = -1;
-   size_t bytes_left, sector_offset, buf_offset, byte_position, write_size, sector;
+   size_t bytes_left, sector_offset, byte_position, write_size, sector;
    BlockDevice bdev = ooc_get_interface((Object) fs_info->device, BlockDevice);
    ext2_fs_info_t *fsinfo;
 
@@ -3625,23 +3775,23 @@ static int ext2_device_buf_memset(filesystem_info_t *fs_info, uint8_t c, uint32_
    {
       memset(ext2_block_buffer, c, EXT2_BLOCK_BUFFER_SIZE);
       sector = (block * fsinfo->sectors_in_block) + (offset / fsinfo->sector_size);
-      bytes_left = nbyte; byte_position = offset; buf_offset = 0;
+      bytes_left = nbyte; byte_position = offset;
       while(bytes_left)
       {
-         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         ret = bdev->read((Object)fs_info->device, (uint8_t *)ext2_sector_buffer, sector, 1);
          if(ret!=1)
          {
             break;
          }
          sector_offset = byte_position % fsinfo->sector_size;
          write_size = fsinfo->sector_size - sector_offset;
-         memset((void *)((uint8_t *)ext2_block_buffer + sector_offset), c, write_size);
-         ret = bdev->write((Object)fs_info->device, (uint8_t *)ext2_block_buffer, sector, 1);
+         write_size = write_size > bytes_left ? bytes_left : write_size;
+         memset((void *)((uint8_t *)ext2_sector_buffer + sector_offset), c, write_size);
+         ret = bdev->write((Object)fs_info->device, (uint8_t *)ext2_sector_buffer, sector, 1);
          if(ret!=1)
          {
             break;
          }
-         buf_offset += write_size;
          byte_position += write_size;
          bytes_left -= write_size;
          sector++;
