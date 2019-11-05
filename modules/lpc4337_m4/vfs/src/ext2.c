@@ -2581,7 +2581,7 @@ static int ext2_delete_directory_file(vnode_t *parent_node, vnode_t *node)
       return -1;
    }
    /* Erase node by writing 0 in its space */
-   memset(pinode, 0, sizeof(ext2_inode_t));   //FIXME: Should erase 128 bits, size that appears in superblock, not struct
+   memset(pinode, 0, sizeof(ext2_inode_t));   //FIXME: Should erase 128/256 bits, size that appears in superblock, not struct
    ret = ext2_set_inode(node->fs_info, finfo->f_inumber, pinode);
    if(0 > ret)
    {
@@ -3582,7 +3582,8 @@ static int ext2_fsinfo_flush(vnode_t *node)
    //dev = node->fs_info->device;
    fsinfo = (ext2_fs_info_t *)node->fs_info->down_layer_info;
 
-   for(group_index = 0; group_index<(fsinfo->s_groups_count); group_index++)
+   //for(group_index = 0; group_index<(fsinfo->s_groups_count); group_index++)
+   for(group_index = 0; group_index<1; group_index++) /* Only first block group */
    {
       //group_offset = fsinfo->e2sb.s_blocks_per_group * fsinfo->s_block_size * group_index;
       group_offset = 0;
@@ -3837,7 +3838,8 @@ static int ext2_set_groupdesc(filesystem_info_t *fs_info, uint16_t ngroup, ext2_
    //dev = fs_info->device;
    fsinfo = (ext2_fs_info_t *)fs_info->down_layer_info;
 
-   for(group_index = 0; group_index<(fsinfo->s_groups_count); group_index++)
+   //for(group_index = 0; group_index<(fsinfo->s_groups_count); group_index++)
+   for(group_index = 0; group_index<1; group_index++) /* Refresh metadata only in first block group */
    {
       //group_offset = fsinfo->e2sb.s_first_data_block * fsinfo->s_block_size +
       //               fsinfo->e2sb.s_blocks_per_group * fsinfo->s_block_size * group_index;
