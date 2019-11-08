@@ -540,6 +540,10 @@ static int mmcSPI_disconnect(MmcSPI self)
 static int mmcSPI_getState(MmcSPI self, blockDevState_t *state)
 {
    assert(ooc_isInstanceOf(self, MmcSPI));
+   if(self->status == MMC_STATUS_READY)
+      *state = BLKDEV_READY;
+   else
+      *state = BLKDEV_UNINIT;
    return 0;
 }
 

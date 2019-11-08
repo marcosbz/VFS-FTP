@@ -948,7 +948,8 @@ static void vfs_task( void )
    }
 
    /* Create file system object with device and fs driver */
-   ret0 = filesystem_create(&fs0, (Device *) &mmc0, &ext2_driver); if(ret < 0) while(1);
+   ret0 = filesystem_create(&fs0, (Device *) &mmc0, &fat_driver); if(ret < 0) while(1);
+   //ret0 = filesystem_create(&fs0, (Device *) &mmc0, &ext2_driver); if(ret < 0) while(1);
    //ret1 = filesystem_create(&fs1, (Device *) &usb0, &fat_driver); if(ret < 0) while(1);
    ret1 = filesystem_create(&fs1, (Device *) &usb0, &ext2_driver); if(ret < 0) while(1);
    //ret = filesystem_create(&fs, (Device *) &nbd0, &fat_driver); if(ret < 0) while(1);
